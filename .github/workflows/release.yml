@@ -42,12 +42,15 @@ jobs:
         shell: pwsh
         run: |
           $tag = '${{ steps.ver.outputs.tag }}'
-          $exists = gh release view $tag --repo ${{ github.repository }} 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            echo "skip=true" >> $env:GITHUB_OUTPUT
-            echo "Release $tag ja existe — pulando build."
+          gh release view $tag --repo ${{ github.repository }} --json url *> $null
+          $code = $LASTEXITCODE
+          $global:LASTEXITCODE = 0
+          if ($code -eq 0) {
+            "skip=true" | Add-Content $env:GITHUB_OUTPUT
+            Write-Host "Release $tag ja existe — pulando build."
           } else {
-            echo "skip=false" >> $env:GITHUB_OUTPUT
+            "skip=false" | Add-Content $env:GITHUB_OUTPUT
+            Write-Host "Release $tag NAO existe — vamos buildar."
           }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -131,7 +134,7 @@ jobs:
             "Release v${{ steps.ver.outputs.version }}. Auto-update do PostMaster pega sozinho." | Out-File dist/RELEASE_NOTES.md -Encoding utf8
           }
 
-      - name: Publish GitHub Release
+      - name: Publish GitHub Release (cria ou re-upload assets)
         if: steps.check.outputs.skip != 'true'
         shell: pwsh
         run: |
@@ -143,5 +146,11 @@ jobs:
             dist/PostMaster-Setup.exe `
             dist/PostMaster-Setup.exe.blockmap `
             dist/latest.yml
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "create falhou ($LASTEXITCODE), tentando upload com clobber..."
+            $global:LASTEXITCODE = 0
+            gh release upload $tag --repo ${{ github.repository }} --clobber `
+              dist/PostMaster-Setup.exe dist/PostMaster-Setup.exe.blockmap dist/latest.yml
+          }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
