@@ -1,0 +1,43 @@
+# Build output
+dist/
+out/
+dist-build.log
+
+# Dependencies
+node_modules/
+
+# Playwright junctions (CI cria via npx playwright install + mklink)
+ms-playwright/
+
+# Electron temp
+.electron/
+
+# Recovery / debug artifacts
+_def_test/
+_pm_*/
+*.tmp
+*.log
+
+# Local dev
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Outputs do PostMaster userData (não devem estar no repo)
+postmaster-data/
+
+# Binarios externos baixados no build (deno.exe excede 100MB do GitHub).
+# O workflow .github/workflows/release.yml baixa antes do electron-builder.
+bin/deno.exe
+bin/yt-dlp.exe
+
+# Scripts privados não-versionados
+scripts/_*

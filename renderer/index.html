@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PostMaster</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Titlebar -->
+<div id="titlebar">
+  <div class="logo">
+    <img src="logo.svg" width="26" height="26" alt="logo">
+    <span>PostMaster</span>
+  </div>
+  <div class="status-bar">
+    <div class="status-chip" id="chip-ai">
+      <div class="dot"></div>
+      <span>IA embarcada</span>
+    </div>
+    <div class="status-chip" id="chip-ytdlp" style="display:none">
+      <div class="dot"></div>
+      <span>yt-dlp</span>
+    </div>
+    <button id="btn-tamoia" title="Pedir ajuda à TamoIA" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;border-radius:14px;padding:6px 14px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;margin-right:8px;font-size:12px;-webkit-app-region:no-drag;box-shadow:0 2px 12px rgba(139,92,246,0.4)">
+      <span style="width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,0.18);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;position:relative">T<span style="position:absolute;top:-1px;right:-1px;width:6px;height:6px;background:#16c784;border-radius:50%;border:1px solid #6366f1"></span></span>
+      Pedir ajuda
+    </button>
+    <div class="win-controls">
+      <button onclick="window.api.win.minimize()" title="Minimizar">─</button>
+      <button onclick="window.api.win.maximize()" title="Maximizar">□</button>
+      <button onclick="window.api.win.close()" title="Fechar" class="close-btn">✕</button>
+    </div>
+  </div>
+</div>
+
+<div id="app">
+  <!-- Sidebar -->
+  <nav id="sidebar">
+    <div class="nav-item active" data-page="dashboard">
+      <span class="icon">◈</span> Dashboard
+    </div>
+    <div class="nav-item" data-page="jobs">
+      <span class="icon">⚙</span> Automações
+    </div>
+    <div class="nav-item" data-page="accounts">
+      <span class="icon">👤</span> Contas
+    </div>
+    <div class="nav-item" data-page="live">
+      <span class="icon">📺</span> Ao vivo
+      <span id="live-badge" class="nav-badge" style="display:none">0</span>
+    </div>
+    <div class="sidebar-sep"></div>
+    <div class="nav-item" data-page="logs">
+      <span class="icon">📋</span> Logs
+    </div>
+  </nav>
+
+  <!-- Content area -->
+  <main id="content">
+
+    <!-- ── Dashboard ── -->
+    <div class="page active" id="page-dashboard">
+      <div class="section-header">
+        <h2>Dashboard</h2>
+        <button class="btn btn-ghost btn-sm" onclick="refreshAll()">↻ Atualizar</button>
+      </div>
+      <div class="stats-row" id="stats-row">
+        <div class="stat-card">
+          <div class="stat-num" id="stat-accounts">0</div>
+          <div class="stat-label">Contas</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" id="stat-running">0</div>
+          <div class="stat-label">Ativas</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" id="stat-posts">0</div>
+          <div class="stat-label">Postagens hoje</div>
+        </div>
+      </div>
+      <div id="dashboard-jobs"></div>
+    </div>
+
+    <!-- ── Jobs ── -->
+    <div class="page" id="page-jobs">
+      <div class="section-header">
+        <h2>Automações</h2>
+        <button class="btn btn-primary" onclick="openWizard()">+ Nova automação</button>
+      </div>
+      <div id="jobs-list">
+        <div class="empty">
+          <div class="empty-icon">⚙</div>
+          <p>Nenhuma automação criada.</p>
+          <p class="text-sm text-muted mt-8">Clique em "+ Nova automação" para começar.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Accounts ── -->
+    <div class="page" id="page-accounts">
+      <div class="section-header">
+        <h2>Contas</h2>
+        <button class="btn btn-primary" id="btn-add-account" onclick="toggleAddAccount()">+ Adicionar conta</button>
+      </div>
+
+      <div id="add-account-form" class="hidden">
+        <div class="card">
+          <div class="form-group">
+            <label>Plataforma</label>
+            <div class="platform-select">
+              <div class="platform-btn selected" data-plat="instagram" onclick="selectPlatform(this)">📸 Instagram</div>
+              <div class="platform-btn" data-plat="tiktok" onclick="selectPlatform(this)">🎵 TikTok</div>
+              <div class="platform-btn" data-plat="youtube" onclick="selectPlatform(this)">▶️ YouTube</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Nome de usuário (sem @)</label>
+            <input type="text" id="input-username" placeholder="ex: minhaconta">
+          </div>
+          <p class="text-sm text-muted" style="margin-bottom:12px">
+            Uma janela de login será aberta. Faça login normalmente — a sessão será salva automaticamente.
+            <br><span style="color:#a78bfa">▶️ YouTube: para baixar vídeos sem bloqueio de bot. Faça login com qualquer conta Google.</span>
+          </p>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" onclick="addAccount()">Fazer login</button>
+            <button class="btn btn-ghost" onclick="toggleAddAccount()">Cancelar</button>
+          </div>
+          <div id="add-account-status" class="mt-8 text-sm" style="display:none"></div>
+        </div>
+      </div>
+
+      <div class="account-grid" id="account-grid">
+        <div class="empty" style="grid-column:1/-1">
+          <div class="empty-icon">👤</div>
+          <p>Nenhuma conta adicionada.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Live View ── -->
+    <div class="page" id="page-live">
+      <div class="section-header">
+        <h2>📺 Ao vivo <span id="live-count" style="color:var(--text-dim);font-weight:400">— 0 sessões</span></h2>
+        <button class="btn btn-ghost btn-sm" onclick="refreshLiveSessions()">↻ Atualizar</button>
+      </div>
+
+      <!-- Toggle on/off -->
+      <div id="live-toggle-card" style="
+        background: linear-gradient(135deg, rgba(99,102,241,0.10), rgba(168,85,247,0.06));
+        border: 1px solid rgba(99,102,241,0.25);
+        border-radius: var(--radius-lg);
+        padding: 16px 20px;
+        margin-bottom: 20px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      ">
+        <div style="font-size: 32px;">⚡</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:15px;margin-bottom:4px">Mostrar tela ao vivo das automações</div>
+          <div id="live-toggle-desc" style="font-size:12.5px;color:var(--text-dim);line-height:1.5">
+            Visualiza em tempo real o que cada automação está fazendo.
+          </div>
+        </div>
+        <label class="switch" style="position:relative;display:inline-block;width:50px;height:28px;flex-shrink:0">
+          <input type="checkbox" id="live-toggle" style="opacity:0;width:0;height:0" checked />
+          <span class="slider" style="
+            position:absolute;cursor:pointer;inset:0;
+            background:rgba(255,255,255,0.1);
+            border-radius:28px;
+            transition:.2s;
+          "></span>
+        </label>
+      </div>
+
+      <div id="live-empty" class="empty" style="padding:60px 20px;text-align:center">
+        <div class="empty-icon" style="font-size:48px">📺</div>
+        <p style="margin-top:12px;color:var(--text-dim)">Nenhuma automação rodando agora.<br><small>Quando uma automação iniciar, ela aparece aqui ao vivo.</small></p>
+      </div>
+      <div id="live-grid" style="
+        display:grid;
+        grid-template-columns:repeat(auto-fill,minmax(280px,1fr));
+        gap:14px;
+      "></div>
+    </div>
+
+    <!-- ── Logs page ── -->
+    <div class="page" id="page-logs">
+      <div class="section-header">
+        <h2>Logs em tempo real</h2>
+        <button class="btn btn-ghost btn-sm" onclick="clearLogs()">🗑 Limpar</button>
+      </div>
+      <div id="logs-page-output" style="
+        background:#0a0d14;
+        border:1px solid var(--border);
+        border-radius:var(--radius-lg);
+        padding:12px;
+        min-height:400px;
+        max-height:calc(100vh - 180px);
+        overflow-y:auto;
+        font-family:'Cascadia Code','Fira Code',Consolas,monospace;
+        font-size:12px;
+        line-height:1.6;
+      "></div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Floating log toggle -->
+<button id="log-toggle" onclick="toggleLogPanel()">
+  📋 Logs <span id="log-badge"></span>
+</button>
+
+<!-- Log panel (floating) -->
+<div id="log-panel">
+  <div class="log-header">
+    📋 Logs ao vivo
+    <button class="close-log" onclick="toggleLogPanel()">✕</button>
+  </div>
+  <div id="log-output"></div>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<!-- ─── Modal TamoIA Suporte ─── -->
+<div id="tamoia-overlay" style="display:none;position:fixed;inset:0;z-index:9998;background:rgba(7,8,11,0.75);backdrop-filter:blur(6px);align-items:center;justify-content:center;padding:24px"
+     onclick="if(event.target===this)closeTamoia()">
+  <div id="tamoia-panel" style="width:100%;max-width:520px;height:min(680px,90vh);background:#0c1018;border:1px solid rgba(99,102,241,0.3);border-radius:18px;display:flex;flex-direction:column;box-shadow:0 24px 72px rgba(0,0,0,0.55);font-family:'Segoe UI',sans-serif;overflow:hidden">
+    <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;background:linear-gradient(135deg,rgba(99,102,241,0.18),rgba(139,92,246,0.08));border-bottom:1px solid rgba(255,255,255,0.06)">
+      <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:1.1rem;position:relative;flex-shrink:0">T
+        <span style="position:absolute;bottom:-1px;right:-1px;width:11px;height:11px;background:#16c784;border-radius:50%;border:2px solid #0c1018"></span>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="color:#eef2f9;font-weight:800;font-size:0.97rem">TamoIA</div>
+        <div style="color:#16c784;font-size:0.72rem;font-weight:600">● Suporte do PostMaster · vai ler os logs do app</div>
+      </div>
+      <button onclick="closeTamoia()" style="background:none;border:none;cursor:pointer;color:#8394b0;font-size:24px;line-height:1;padding:4px 8px">×</button>
+    </div>
+    <div id="tamoia-messages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px"></div>
+    <div style="padding:12px;border-top:1px solid rgba(255,255,255,0.05);background:rgba(7,8,11,0.6)">
+      <div style="display:flex;gap:8px;background:#161b27;border-radius:14px;padding:8px 10px 8px 14px;border:1px solid rgba(255,255,255,0.06)">
+        <textarea id="tamoia-input" placeholder="Descreva o que está acontecendo..." rows="1" style="flex:1;background:transparent;border:none;color:#eef2f9;font-size:0.92rem;resize:none;font-family:inherit;outline:none;max-height:100px"></textarea>
+        <button id="tamoia-send" onclick="sendTamoia()" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;border-radius:10px;padding:6px 12px;cursor:pointer;font-weight:800;font-size:0.82rem;align-self:flex-end">↑</button>
+      </div>
+      <div style="text-align:center;font-size:0.7rem;color:#4e5c72;margin-top:8px">
+        Pra falar com pessoa, digita <strong style="color:#8394b0">"quero falar com humano"</strong>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Wizard overlay -->
+<div class="overlay" id="wizard-overlay">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-header">
+      <h3 id="wizard-title">Nova Automação</h3>
+      <button class="modal-close" onclick="closeWizard()">✕</button>
+    </div>
+    <div class="wizard-steps" id="wizard-steps"></div>
+    <div class="wizard-body" id="wizard-body"></div>
+    <div class="wizard-nav">
+      <button class="btn btn-ghost" id="wizard-back" onclick="wizardBack()">← Voltar</button>
+      <button class="btn btn-primary" id="wizard-next" onclick="wizardNext()">Próximo →</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+
+<!-- ─── TamoIA Suporte (isolated script) ─── -->
+<script>
+(function(){
+  const overlay = document.getElementById('tamoia-overlay')
+  const msgsEl = document.getElementById('tamoia-messages')
+  const input = document.getElementById('tamoia-input')
+  const sendBtn = document.getElementById('tamoia-send')
+
+  let messages = []
+  let busy = false
+
+  const PRIMEIRA = {
+    role: 'assistant',
+    content: 'Oi! Sou a **TamoIA** 👋\n\nConsigo ler os logs do app aqui, então me conta o que está acontecendo ou no que posso ajudar. Se for um problema técnico, manda os detalhes — vou olhar os logs em tempo real e te respondo.'
+  }
+
+  function renderInline(text) {
+    // Render simples: **bold** + linebreaks. Sem HTML risk pq vem do nosso bridge.
+    const escaped = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    return escaped.replace(/\*\*([^*]+)\*\*/g, '<strong style="color:#eef2f9">$1</strong>').replace(/\n/g, '<br>')
+  }
+
+  function bubble(role, content) {
+    const isUser = role === 'user'
+    const wrap = document.createElement('div')
+    wrap.style.cssText = `display:flex;justify-content:${isUser?'flex-end':'flex-start'}`
+    const b = document.createElement('div')
+    b.style.cssText = `background:${isUser?'linear-gradient(135deg,#6366f1,#8b5cf6)':'#161b27'};color:${isUser?'#fff':'#c8d6f0'};border-radius:${isUser?'14px 14px 4px 14px':'14px 14px 14px 4px'};padding:9px 13px;font-size:0.9rem;line-height:1.5;max-width:88%;border:${isUser?'none':'1px solid rgba(255,255,255,0.05)'};word-wrap:break-word`
+    b.innerHTML = renderInline(content)
+    wrap.appendChild(b)
+    msgsEl.appendChild(wrap)
+    msgsEl.scrollTop = msgsEl.scrollHeight
+  }
+
+  function typingBubble() {
+    const wrap = document.createElement('div')
+    wrap.id = 'tamoia-typing'
+    wrap.style.cssText = 'display:flex;justify-content:flex-start'
+    wrap.innerHTML = `<div style="background:#161b27;border:1px solid rgba(255,255,255,0.05);border-radius:14px 14px 14px 4px;padding:10px 14px;display:flex;gap:4px;align-items:center">
+      <span class="td"></span><span class="td"></span><span class="td"></span>
+    </div>
+    <style>
+      @keyframes tdot{0%,60%,100%{transform:translateY(0);opacity:.5}30%{transform:translateY(-3px);opacity:1}}
+      .td{width:6px;height:6px;border-radius:50%;background:#8394b0;display:inline-block;animation:tdot 1.2s ease-in-out infinite}
+      .td:nth-child(2){animation-delay:.18s}.td:nth-child(3){animation-delay:.36s}
+    </style>`
+    msgsEl.appendChild(wrap)
+    msgsEl.scrollTop = msgsEl.scrollHeight
+  }
+  function removeTyping() {
+    const t = document.getElementById('tamoia-typing')
+    if (t) t.remove()
+  }
+
+  window.openTamoia = function() {
+    overlay.style.display = 'flex'
+    if (messages.length === 0) {
+      messages.push(PRIMEIRA)
+      bubble(PRIMEIRA.role, PRIMEIRA.content)
+    }
+    setTimeout(() => input.focus(), 200)
+  }
+  window.closeTamoia = function() {
+    overlay.style.display = 'none'
+  }
+
+  window.sendTamoia = async function() {
+    const text = input.value.trim()
+    if (!text || busy) return
+    messages.push({ role: 'user', content: text })
+    bubble('user', text)
+    input.value = ''
+    busy = true
+    sendBtn.style.opacity = '0.6'
+    typingBubble()
+    try {
+      const resp = await window.api.support.chat(messages)
+      removeTyping()
+      const answer = resp?.content || 'Não consegui responder agora. Tenta de novo ou manda WhatsApp pra +55 11 96724-5795.'
+      messages.push({ role: 'assistant', content: answer })
+      bubble('assistant', answer)
+    } catch (e) {
+      removeTyping()
+      bubble('assistant', 'Travou aqui do meu lado. Manda WhatsApp pra **+55 11 96724-5795** que respondo direto.')
+    } finally {
+      busy = false
+      sendBtn.style.opacity = '1'
+      input.focus()
+    }
+  }
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      sendTamoia()
+    }
+  })
+
+  document.getElementById('btn-tamoia').addEventListener('click', openTamoia)
+})()
+</script>
+
+</body>
+</html>

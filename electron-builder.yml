@@ -1,0 +1,85 @@
+appId: com.iaempresa.postmaster
+productName: PostMaster
+copyright: Copyright © 2026 iaempresa.app
+
+directories:
+  output: dist
+  buildResources: build
+
+# Inclui todo o source do app + apenas o necessário de node_modules em runtime
+files:
+  - "main.js"
+  - "preload.js"
+  - "package.json"
+  - "src/**/*"
+  - "renderer/**/*"
+  - "models/**/*"
+  - "node_modules/**/*"
+  - "!**/{CHANGELOG.md,README.md,README,readme.md,readme}"
+  - "!**/test/**"
+  - "!**/tests/**"
+  - "!**/*.map"
+  - "!**/{.bin,.cache,.github,.idea,.vscode}/**"
+
+# Native modules: precisam ficar fora do asar para o Electron carregar o .node
+asarUnpack:
+  - "node_modules/node-llama-cpp/**/*"
+  - "node_modules/@node-llama-cpp/**/*"
+  - "node_modules/onnxruntime-node/**/*"
+  - "node_modules/sharp/**/*"
+  - "node_modules/@img/**/*"
+  - "node_modules/ffmpeg-static/**/*"
+  - "models/**/*"
+
+# Recursos externos copiados pra resources/ (acessíveis via process.resourcesPath)
+extraResources:
+  # Chromium do Playwright (revisão 1223 = Playwright 1.60). main.js aponta
+  # PLAYWRIGHT_BROWSERS_PATH = process.resourcesPath/ms-playwright em prod.
+  # ms-playwright/* aqui no projeto sao junctions pra %LOCALAPPDATA%\ms-playwright
+  # (electron-builder nao expande ${env.X} como path absoluto direito; path
+  # relativo via junction funciona e nao duplica 300MB no disco).
+  - from: "ms-playwright/chromium-1223"
+    to: "ms-playwright/chromium-1223"
+  # Posters (poster/instagram.mjs, poster/tiktok.mjs) lancam Playwright em
+  # headless por default → precisa do binario chrome-headless-shell, nao do
+  # chrome.exe completo. v1.0.31/v1.0.32 estouravam "Executable doesn't exist"
+  # ao postar porque so empacotei o chromium-1223.
+  - from: "ms-playwright/chromium_headless_shell-1223"
+    to: "ms-playwright/chromium_headless_shell-1223"
+  - from: "ms-playwright/ffmpeg-1011"
+    to: "ms-playwright/ffmpeg-1011"
+  # yt-dlp.exe — espelha o que estava em resources/bin/ no instalador v1.0.30
+  - from: "bin/yt-dlp.exe"
+    to: "bin/yt-dlp.exe"
+  # deno.exe — runtime JS que o yt-dlp usa pra resolver o "n challenge" do YouTube.
+  # Sem ele yt-dlp falha com "Requested format not available" / "Only images are
+  # available for download" e o app mostra "0 candidatos". Esqueci de incluir do
+  # v1.0.31 ate v1.0.34, clientes nao conseguiam baixar de YT desde a recuperacao.
+  - from: "bin/deno.exe"
+    to: "bin/deno.exe"
+  # Modelo de face (fase 2). main.js copia daqui pra userData no boot.
+  - from: "models/face-detector.onnx"
+    to: "models/face-detector.onnx"
+
+win:
+  target:
+    - target: nsis
+      arch: x64
+  icon: build/icon.ico
+  artifactName: "PostMaster-Setup.${ext}"
+
+nsis:
+  # GUID forçado pra bater com a instalação v1.0.30 e fazer update no lugar
+  # (computado a partir do appId original que se perdeu — extraído do registry HKCU)
+  guid: afe84ebd-6e58-500b-a718-ee1bd8fccd6c
+  oneClick: true
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  deleteAppDataOnUninstall: false
+  artifactName: "PostMaster-Setup.${ext}"
+
+publish:
+  provider: github
+  owner: tamoaiapp
+  repo: postmaster
+  releaseType: release

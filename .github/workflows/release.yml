@@ -1,0 +1,147 @@
+name: Build + Release PostMaster
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - package.json
+      - main.js
+      - preload.js
+      - 'src/**'
+      - 'renderer/**'
+      - 'models/**'
+      - 'bin/**'
+      - electron-builder.yml
+      - '.github/workflows/release.yml'
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: ver
+        shell: pwsh
+        run: |
+          $pkg = Get-Content package.json | ConvertFrom-Json
+          $ver = $pkg.version
+          echo "version=$ver" >> $env:GITHUB_OUTPUT
+          echo "tag=v$ver" >> $env:GITHUB_OUTPUT
+
+      - name: Check if release already exists
+        id: check
+        shell: pwsh
+        run: |
+          $tag = '${{ steps.ver.outputs.tag }}'
+          $exists = gh release view $tag --repo ${{ github.repository }} 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            echo "skip=true" >> $env:GITHUB_OUTPUT
+            echo "Release $tag ja existe — pulando build."
+          } else {
+            echo "skip=false" >> $env:GITHUB_OUTPUT
+          }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Node 22
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Disable code signing (sem cert)
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> $env:GITHUB_ENV
+
+      - name: Install dependencies
+        if: steps.check.outputs.skip != 'true'
+        run: npm ci --no-audit --no-fund
+
+      - name: Baixa bin/deno.exe (122MB, fora do repo)
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          $url = 'https://github.com/denoland/deno/releases/download/v2.1.4/deno-x86_64-pc-windows-msvc.zip'
+          $zip = "$env:RUNNER_TEMP\deno.zip"
+          Invoke-WebRequest $url -OutFile $zip
+          Expand-Archive $zip -DestinationPath bin -Force
+          if (-not (Test-Path bin\deno.exe)) { throw "deno.exe nao extraido" }
+          (Get-Item bin\deno.exe).Length / 1MB
+
+      - name: Baixa bin/yt-dlp.exe
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
+          Invoke-WebRequest $url -OutFile bin\yt-dlp.exe
+          (Get-Item bin\yt-dlp.exe).Length / 1MB
+
+      - name: Install Playwright Chromium + headless_shell + ffmpeg
+        if: steps.check.outputs.skip != 'true'
+        run: npx playwright install chromium chromium-headless-shell ffmpeg
+
+      - name: Junctions pra ms-playwright (electron-builder usa path relativo)
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $src = "$env:LOCALAPPDATA\ms-playwright"
+          $dst = "$PWD\ms-playwright"
+          New-Item -ItemType Directory -Force -Path $dst | Out-Null
+          foreach ($name in 'chromium-1223','chromium_headless_shell-1223','ffmpeg-1011') {
+            $target = "$src\$name"
+            $link = "$dst\$name"
+            if (Test-Path $target) {
+              if (Test-Path $link) { Remove-Item $link -Recurse -Force }
+              cmd /c mklink /J "$link" "$target" | Out-Null
+              echo "OK: $name"
+            } else {
+              echo "FALTA: $target"
+            }
+          }
+
+      - name: Build electron-builder
+        if: steps.check.outputs.skip != 'true'
+        run: npx electron-builder --win --x64 --publish=never
+
+      - name: List artifacts
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -File | Select-Object Name,@{N='MB';E={[math]::Round($_.Length/1MB,1)}} | Format-Table -AutoSize
+
+      - name: Release notes from RELEASE_NOTES.md or fallback
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          if (Test-Path RELEASE_NOTES.md) {
+            Copy-Item RELEASE_NOTES.md dist/RELEASE_NOTES.md
+          } else {
+            "Release v${{ steps.ver.outputs.version }}. Auto-update do PostMaster pega sozinho." | Out-File dist/RELEASE_NOTES.md -Encoding utf8
+          }
+
+      - name: Publish GitHub Release
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          $tag = '${{ steps.ver.outputs.tag }}'
+          gh release create $tag `
+            --repo ${{ github.repository }} `
+            --title '${{ steps.ver.outputs.version }}' `
+            --notes-file dist/RELEASE_NOTES.md `
+            dist/PostMaster-Setup.exe `
+            dist/PostMaster-Setup.exe.blockmap `
+            dist/latest.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
