@@ -55,6 +55,10 @@
     <div class="nav-item" data-page="logs">
       <span class="icon">📋</span> Logs
     </div>
+    <div class="sidebar-sep"></div>
+    <div class="nav-item" id="nav-tour" onclick="window.startPostMasterTour && window.startPostMasterTour({force:true})" style="opacity:0.75">
+      <span class="icon">💡</span> Ver tour
+    </div>
   </nav>
 
   <!-- Content area -->
@@ -324,6 +328,242 @@
   function escapeHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
   }
+})()
+</script>
+
+<!-- ─── Tour guiado pra usuario novo ─── -->
+<script>
+(function(){
+  const STORAGE_KEY = 'pm-tour-done-v1'
+
+  // Cada step:
+  //   targetSelector  → null = modal centralizado | seletor CSS = spotlight
+  //   page            → page-id pra ativar antes do step
+  //   title, body     → conteudo
+  //   placement       → 'right' | 'left' | 'bottom' | 'top'
+  const STEPS = [
+    {
+      target: null,
+      title: '👋 Bem-vindo ao PostMaster',
+      body: 'O PostMaster posta seus vídeos automaticamente no Instagram e TikTok.<br><br>Você configura UMA vez e ele fica trabalhando sozinho — baixa vídeos de um canal/perfil que você escolher e publica na sua conta com legenda gerada por IA.<br><br>Esse tour rápido (1 min) vai te mostrar como funciona.',
+      cta: 'Começar tour →',
+    },
+    {
+      target: '[data-page="accounts"]',
+      page: 'accounts',
+      placement: 'right',
+      title: '1. Adicione suas contas',
+      body: 'Primeiro passo: conectar as contas onde você quer POSTAR (Instagram, TikTok) e a do YouTube pra <em>baixar</em> os vídeos sem cair em bloqueio de bot.<br><br>Abre uma janela de login normal — você só faz login uma vez.',
+    },
+    {
+      target: '[data-page="jobs"]',
+      page: 'jobs',
+      placement: 'right',
+      title: '2. Crie uma automação',
+      body: 'Aqui você monta o esquema: <strong>de onde</strong> pegar (canal do YouTube, perfil do Instagram, ou pasta no seu PC) e <strong>pra onde</strong> mandar (qual conta sua posta).<br><br>📌 <strong>Importante</strong>: o app pega <em>todos</em> os vídeos do canal — sem filtrar por duração. Se quiser filtrar, usa o campo <em>"Bloquear palavras"</em> (ex: <code>ao vivo, live</code>) ou marca <em>"Tipo de corte: inteligente"</em> pra ele escolher o melhor trecho de qualquer vídeo.<br><br>Configura intervalo (ex: 1 post a cada 2h) e pronto.',
+    },
+    {
+      target: '[data-page="live"]',
+      page: 'live',
+      placement: 'right',
+      title: '3. Acompanhe ao vivo',
+      body: 'Quando uma automação tá rodando, dá pra ver em tempo real o que ela tá fazendo: baixando, editando, postando.<br><br>Tipo um "olhinho mágico" — se algo travar, você vê na hora.',
+    },
+    {
+      target: '#btn-tamoia',
+      placement: 'bottom',
+      title: '4. TamoIA — sua atendente 24/7',
+      body: 'Travou algo? Deu erro? Tem dúvida? Clica nesse botão.<br><br>A <strong>TamoIA</strong> é uma IA treinada que <em>lê os logs do seu app em tempo real</em> e te responde direto. Sem fila, sem esperar humano.<br><br>Ela resolve sozinha 90% dos casos.',
+    },
+    {
+      target: null,
+      title: '🚀 Tudo pronto!',
+      body: '<strong>Seu próximo passo:</strong><br>Vai em <strong>"Contas"</strong> no menu lateral e adiciona sua primeira conta do Instagram ou TikTok.<br><br>Qualquer dúvida no caminho, chama a <strong>TamoIA</strong> ali em cima. ✨',
+      cta: 'Começar a usar',
+    },
+  ]
+
+  let currentStep = 0
+  let isActive = false
+
+  function buildOverlay() {
+    let el = document.getElementById('pm-tour-overlay')
+    if (el) return el
+    el = document.createElement('div')
+    el.id = 'pm-tour-overlay'
+    el.style.cssText = 'position:fixed;inset:0;z-index:9999;pointer-events:none;font-family:Segoe UI,sans-serif'
+    el.innerHTML = `
+      <div id="pm-tour-dim" style="position:absolute;inset:0;background:rgba(7,8,11,0.72);backdrop-filter:blur(3px);transition:opacity .25s;pointer-events:auto"></div>
+      <div id="pm-tour-spot" style="position:absolute;border-radius:14px;box-shadow:0 0 0 9999px rgba(7,8,11,0.78),0 0 0 4px rgba(99,102,241,0.6),0 0 40px rgba(99,102,241,0.4);transition:all .35s cubic-bezier(.4,0,.2,1);pointer-events:none;display:none"></div>
+      <div id="pm-tour-card" style="position:absolute;background:#0c1018;border:1px solid rgba(99,102,241,0.35);border-radius:18px;padding:22px 24px;color:#eef2f9;box-shadow:0 24px 60px rgba(0,0,0,0.6);max-width:380px;pointer-events:auto;transition:all .3s ease;opacity:0;transform:translateY(8px)">
+        <div id="pm-tour-progress" style="display:flex;gap:5px;margin-bottom:14px"></div>
+        <div id="pm-tour-title" style="font-weight:800;font-size:1.05rem;margin-bottom:8px;line-height:1.3"></div>
+        <div id="pm-tour-body" style="font-size:0.88rem;color:#c8d6f0;line-height:1.55;margin-bottom:18px"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+          <button id="pm-tour-skip" style="background:none;border:none;color:#6b7a92;cursor:pointer;font-size:0.8rem;text-decoration:underline">Pular tour</button>
+          <div style="display:flex;gap:8px">
+            <button id="pm-tour-back" style="background:transparent;border:1px solid rgba(255,255,255,0.12);color:#c8d6f0;border-radius:10px;padding:7px 14px;cursor:pointer;font-size:0.82rem;font-weight:600">← Voltar</button>
+            <button id="pm-tour-next" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;border-radius:10px;padding:7px 18px;cursor:pointer;font-size:0.82rem;font-weight:700;box-shadow:0 4px 14px rgba(99,102,241,0.35)">Próximo →</button>
+          </div>
+        </div>
+      </div>
+    `
+    document.body.appendChild(el)
+    el.querySelector('#pm-tour-dim').addEventListener('click', () => {
+      // Click no escuro = avança (UX comum em tours)
+      next()
+    })
+    el.querySelector('#pm-tour-skip').addEventListener('click', endTour)
+    el.querySelector('#pm-tour-back').addEventListener('click', back)
+    el.querySelector('#pm-tour-next').addEventListener('click', next)
+    return el
+  }
+
+  function activatePage(pageId) {
+    if (!pageId) return
+    document.querySelectorAll('.nav-item[data-page]').forEach(n => n.classList.toggle('active', n.dataset.page === pageId))
+    document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + pageId))
+  }
+
+  function positionCard(target, placement, cardEl) {
+    const card = cardEl
+    if (!target) {
+      // Modal centralizado
+      card.style.top = '50%'
+      card.style.left = '50%'
+      card.style.transform = 'translate(-50%, -50%)'
+      return
+    }
+    const r = target.getBoundingClientRect()
+    const cw = 380, ch = card.offsetHeight || 240
+    const pad = 16
+    let top, left
+    switch (placement) {
+      case 'right':
+        top = Math.max(20, r.top + r.height / 2 - ch / 2)
+        left = r.right + pad
+        break
+      case 'left':
+        top = Math.max(20, r.top + r.height / 2 - ch / 2)
+        left = r.left - cw - pad
+        break
+      case 'bottom':
+        top = r.bottom + pad
+        left = Math.max(20, Math.min(window.innerWidth - cw - 20, r.left + r.width / 2 - cw / 2))
+        break
+      case 'top':
+        top = r.top - ch - pad
+        left = Math.max(20, Math.min(window.innerWidth - cw - 20, r.left + r.width / 2 - cw / 2))
+        break
+      default:
+        top = window.innerHeight / 2 - ch / 2
+        left = window.innerWidth / 2 - cw / 2
+    }
+    // Clamp
+    if (top + ch > window.innerHeight - 20) top = window.innerHeight - ch - 20
+    if (left + cw > window.innerWidth - 20) left = window.innerWidth - cw - 20
+    if (top < 20) top = 20
+    if (left < 20) left = 20
+    card.style.top = top + 'px'
+    card.style.left = left + 'px'
+    card.style.transform = 'translate(0,0)'
+  }
+
+  function positionSpotlight(target, spotEl) {
+    if (!target) {
+      spotEl.style.display = 'none'
+      return
+    }
+    const r = target.getBoundingClientRect()
+    spotEl.style.display = 'block'
+    spotEl.style.top = (r.top - 6) + 'px'
+    spotEl.style.left = (r.left - 6) + 'px'
+    spotEl.style.width = (r.width + 12) + 'px'
+    spotEl.style.height = (r.height + 12) + 'px'
+  }
+
+  function renderProgress(el, total, current) {
+    el.innerHTML = ''
+    for (let i = 0; i < total; i++) {
+      const dot = document.createElement('div')
+      dot.style.cssText = `flex:1;height:3px;border-radius:3px;background:${i <= current ? 'linear-gradient(90deg,#6366f1,#8b5cf6)' : 'rgba(255,255,255,0.08)'};transition:.3s`
+      el.appendChild(dot)
+    }
+  }
+
+  function showStep(i) {
+    const step = STEPS[i]
+    if (!step) return endTour()
+    if (step.page) activatePage(step.page)
+    const overlay = buildOverlay()
+    const card = overlay.querySelector('#pm-tour-card')
+    const spot = overlay.querySelector('#pm-tour-spot')
+    const target = step.target ? document.querySelector(step.target) : null
+
+    overlay.querySelector('#pm-tour-title').innerHTML = step.title
+    overlay.querySelector('#pm-tour-body').innerHTML = step.body
+    overlay.querySelector('#pm-tour-back').style.visibility = i === 0 ? 'hidden' : 'visible'
+    overlay.querySelector('#pm-tour-next').textContent = step.cta || (i === STEPS.length - 1 ? 'Concluir ✓' : 'Próximo →')
+    renderProgress(overlay.querySelector('#pm-tour-progress'), STEPS.length, i)
+
+    // Sequência: spotlight primeiro, card depois (timing)
+    requestAnimationFrame(() => {
+      positionSpotlight(target, spot)
+      requestAnimationFrame(() => {
+        positionCard(target, step.placement, card)
+        card.style.opacity = '1'
+      })
+    })
+  }
+
+  function next() {
+    if (currentStep >= STEPS.length - 1) return endTour()
+    currentStep++
+    const card = document.getElementById('pm-tour-card')
+    if (card) card.style.opacity = '0'
+    setTimeout(() => showStep(currentStep), 150)
+  }
+  function back() {
+    if (currentStep <= 0) return
+    currentStep--
+    const card = document.getElementById('pm-tour-card')
+    if (card) card.style.opacity = '0'
+    setTimeout(() => showStep(currentStep), 150)
+  }
+  function endTour() {
+    isActive = false
+    const overlay = document.getElementById('pm-tour-overlay')
+    if (overlay) {
+      overlay.style.opacity = '0'
+      setTimeout(() => overlay.remove(), 250)
+    }
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ done: true, at: Date.now() })) } catch {}
+  }
+
+  window.startPostMasterTour = function(opts = {}) {
+    if (isActive) return
+    if (!opts.force) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null')
+        if (saved?.done) return
+      } catch {}
+    }
+    isActive = true
+    currentStep = 0
+    showStep(0)
+  }
+
+  // Reposiciona em resize
+  window.addEventListener('resize', () => {
+    if (!isActive) return
+    const step = STEPS[currentStep]
+    const target = step?.target ? document.querySelector(step.target) : null
+    positionSpotlight(target, document.getElementById('pm-tour-spot'))
+    positionCard(target, step?.placement, document.getElementById('pm-tour-card'))
+  })
+
+  // Auto-start no boot, depois de 1.2s pra UI estabilizar
+  setTimeout(() => window.startPostMasterTour(), 1200)
 })()
 </script>
 

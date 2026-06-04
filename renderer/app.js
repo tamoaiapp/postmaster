@@ -745,8 +745,11 @@ function openWizard() {
   wizardData = {
     name: '', platform: 'instagram', account: '',
     source: 'youtube', sourceUrls: '', sourceHandles: '',
-    // Filtros de fonte
-    filterMinDur: 60, filterMaxDur: 300,
+    // Filtros de fonte. Duração: defaults amplos = sem filtro efetivo.
+    // Filtro de duração removido do UI em v1.0.44 — o cliente nao via o
+    // campo, mas o default antigo (60-300s) descartava videos do canal
+    // silenciosamente. Agora 10-3600s é so sanity check (ignora live de 4h).
+    filterMinDur: 10, filterMaxDur: 3600,
     filterKeywordInclude: '', filterKeywordExclude: '',
     filterOnlyNew: true, filterMaxVideos: 20,
     cutType: 'smart', // 'smart' | 'full'
@@ -780,8 +783,6 @@ function syncDOMToWizard() {
     'wiz-urls': ['sourceUrls', 'text'],
     'wiz-handles': ['sourceHandles', 'text'],
     'wiz-folder': ['sourceFolder', 'text'],
-    'wiz-min-dur': ['filterMinDur', 'int'],
-    'wiz-max-dur': ['filterMaxDur', 'int'],
     'wiz-max-videos': ['filterMaxVideos', 'int'],
     'wiz-kw-include': ['filterKeywordInclude', 'text'],
     'wiz-kw-exclude': ['filterKeywordExclude', 'text'],
@@ -1066,12 +1067,8 @@ function getWizardBody(step) {
         ${wizardData.source !== 'manual' ? `
         <div class="form-row">
           <div class="form-group">
-            <label>Duração</label>
-            <div>${wizardData.filterMinDur}s – ${wizardData.filterMaxDur}s</div>
-          </div>
-          <div class="form-group">
             <label>Verificar últimos</label>
-            <div>${wizardData.filterMaxVideos} vídeos</div>
+            <div>${wizardData.filterMaxVideos} vídeos do canal</div>
           </div>
           <div class="form-group">
             <label>Só novos</label>
@@ -1167,9 +1164,9 @@ function collectWizardStep(step) {
       wizardData.sourceFolder  = document.getElementById('wiz-folder')?.value.trim() || ''
       if (wizardData.source === 'youtube' && !wizardData.sourceUrls) { toast('Adicione pelo menos uma URL de canal', 'err'); return false }
       if (['instagram','tiktok'].includes(wizardData.source) && !wizardData.sourceHandles) { toast('Adicione pelo menos um perfil', 'err'); return false }
-      // Filtros
-      wizardData.filterMinDur         = parseInt(document.getElementById('wiz-min-dur')?.value || '60')
-      wizardData.filterMaxDur         = parseInt(document.getElementById('wiz-max-dur')?.value || '300')
+      // Filtros — duração tem defaults amplos (sem filtro efetivo); sem UI.
+      wizardData.filterMinDur         = wizardData.filterMinDur || 10
+      wizardData.filterMaxDur         = wizardData.filterMaxDur || 3600
       wizardData.filterMaxVideos      = parseInt(document.getElementById('wiz-max-videos')?.value || '20')
       wizardData.filterKeywordInclude = document.getElementById('wiz-kw-include')?.value.trim() || ''
       wizardData.filterKeywordExclude = document.getElementById('wiz-kw-exclude')?.value.trim() || ''
@@ -1179,7 +1176,6 @@ function collectWizardStep(step) {
       wizardData.editMode             = wizardData.editMode || 'auto'
       wizardData.watermarkText        = document.getElementById('wiz-wm-text')?.value || ''
       wizardData.watermarkImagePath   = document.getElementById('wiz-wm-image')?.value || ''
-      if (wizardData.filterMinDur >= wizardData.filterMaxDur) { toast('Duração mínima deve ser menor que a máxima', 'err'); return false }
       return true
     case 1:
       wizardData.account = document.getElementById('wiz-account')?.value || ''
