@@ -87,8 +87,10 @@ export default async function jobRunner(job, dataDir, log) {
       // 2️⃣ Busca novo vídeo no canal
       liveView.updateStatus(liveJobId, 'Buscando vídeos no canal')
       const candidatos = await buscarVideoYoutube(job.sourceUrls || '', stateFile, log, {
-        minDur:         job.filterMinDur         ?? 60,
-        maxDur:         job.filterMaxDur         ?? 300,
+        // Defaults amplos: sem filtro de duracao por padrao (v1.0.44+).
+        // Antes 60-300s descartava videos do canal silenciosamente.
+        minDur:         job.filterMinDur         ?? 10,
+        maxDur:         job.filterMaxDur         ?? 3600,
         maxVideos:      job.filterMaxVideos       ?? 20,
         keywordInclude: job.filterKeywordInclude  || '',
         keywordExclude: job.filterKeywordExclude  || '',
