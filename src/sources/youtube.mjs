@@ -118,6 +118,12 @@ export async function buscarVideoYoutube(urls, stateFile, log, filtros = {}, dat
   saveState(stateFile, state)
   log(`📺 Canal: ${canal}`)
 
+  // Valida que o URL eh de CANAL e nao de video especifico. Erro comum:
+  // cliente cola youtube.com/watch?v=XXX em vez de youtube.com/@nomedocanal.
+  if (/youtube\.com\/watch\?v=|youtu\.be\/(?!@)/.test(canal) && !/\/(@|c\/|channel\/|user\/|playlist\?)/.test(canal)) {
+    throw new Error(`config_youtube_url_is_video: voce colou um link de video especifico no campo de canal. Use o link do CANAL (ex: youtube.com/@nomedocanal). URL invalida: ${canal.slice(0, 80)}`)
+  }
+
   // ATENÇÃO: NÃO passar --js-runtimes em Electron empacotado!
   // process.execPath aponta para PostMaster.exe (não node.exe), então o yt-dlp
   // tenta executar o app gráfico como Node — abre janelas em loop e download falha.

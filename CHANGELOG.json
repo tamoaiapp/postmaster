@@ -1,0 +1,103 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tamoaiapp/postmaster/main/CHANGELOG.schema.json",
+  "_doc": "Lista de versoes com os kinds de erro que cada uma corrige. O app baixa esse JSON, verifica se o cliente teve algum desses erros recentemente, e mostra toast quando o auto-update aplicar o fix. Fonte: src/supportAgent.mjs classifyError().",
+  "versions": [
+    {
+      "version": "1.0.43",
+      "fixed": [
+        {
+          "kind": "config_youtube_url_is_video",
+          "message": "Agora o app avisa direto se você cola um link de vídeo do YouTube no lugar do canal — antes ficava tentando baixar até dar erro."
+        }
+      ]
+    },
+    {
+      "version": "1.0.42",
+      "fixed": []
+    },
+    {
+      "version": "1.0.40",
+      "fixed": [
+        {
+          "kind": "ig_rejected_video",
+          "message": "Quando o Instagram rejeitava o vídeo (codec/formato), o app ficava esperando 40s pelo botão Avançar. Agora detecta na hora e marca o vídeo como problemático pra não tentar de novo."
+        },
+        {
+          "kind": "ig_next_button_not_found",
+          "message": "Erro 'Botão Next/Avançar não encontrado' agora é detectado mais cedo (era o sintoma do bug acima)."
+        }
+      ]
+    },
+    {
+      "version": "1.0.39",
+      "fixed": []
+    },
+    {
+      "version": "1.0.38",
+      "fixed": [
+        {
+          "kind": "support_agent_added",
+          "message": "Adicionado o botão 'Pedir ajuda à TamoIA' no topo do app — IA dentro do app que lê seus logs e responde."
+        }
+      ]
+    },
+    {
+      "version": "1.0.37",
+      "fixed": [
+        {
+          "kind": "ig_joyride_typo",
+          "message": "Click do botão Avançar do Instagram travava por causa do overlay do tour onboarding (typo no seletor)."
+        }
+      ]
+    },
+    {
+      "version": "1.0.36",
+      "fixed": [
+        {
+          "kind": "tt_are_you_sure_exit",
+          "message": "TikTok travava em 'Publicando' quando aparecia diálogo Are you sure you want to exit? em inglês."
+        }
+      ]
+    },
+    {
+      "version": "1.0.35",
+      "fixed": [
+        {
+          "kind": "yt_n_challenge_failed",
+          "message": "YouTube não baixava nenhum vídeo (n-challenge falhando) — faltava o deno.exe no installer."
+        }
+      ]
+    },
+    {
+      "version": "1.0.34",
+      "fixed": [
+        {
+          "kind": "tt_joyride_blocking",
+          "message": "Tour onboarding do TikTok bloqueava clique na legenda durante publicação."
+        }
+      ]
+    },
+    {
+      "version": "1.0.33",
+      "fixed": [
+        {
+          "kind": "tt_chrome_headless_missing",
+          "message": "Erro chrome-headless-shell.exe doesn't exist ao postar no Instagram/TikTok."
+        },
+        {
+          "kind": "playwright_chrome_missing",
+          "message": "Mesmo problema acima (mensagem variava)."
+        }
+      ]
+    },
+    {
+      "version": "1.0.32",
+      "fixed": [
+        {
+          "kind": "manual_source_notdir",
+          "message": "Erro ENOTDIR quando você apontava um arquivo .mp4 no lugar de uma pasta. Agora o app aceita os dois."
+        }
+      ]
+    }
+  ]
+}

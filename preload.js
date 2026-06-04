@@ -54,7 +54,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   // Eventos recebidos do main
   on: (channel, fn) => {
-    const allowed = ['job:log', 'job:status', 'job:update', 'ai:status', 'ai:log', 'update:status', 'live:frame', 'live:sessions']
+    const allowed = ['job:log', 'job:status', 'job:update', 'ai:status', 'ai:log', 'update:status', 'live:frame', 'live:sessions', 'fix:announcements']
     if (allowed.includes(channel)) ipcRenderer.on(channel, (_, data) => fn(data))
   },
   off: (channel) => ipcRenderer.removeAllListeners(channel),

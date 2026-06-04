@@ -176,6 +176,17 @@ app.whenReady().then(async () => {
       const s = readSettings()
       liveView.setEnabled(s.liveViewEnabled !== false)
     } catch (e) { console.error('liveView init falhou:', e?.message) }
+    // Aviso de fix aplicado — depois de 4s pra deixar o app estabilizar.
+    setTimeout(async () => {
+      try {
+        const { getPendingFixAnnouncements, markAnnouncementsAsShown } = await import('./src/fixAnnouncer.mjs')
+        const announcements = await getPendingFixAnnouncements({ appDir: __dirname, dataDir: DATA_DIR })
+        if (announcements.length > 0 && win) {
+          win.webContents.send('fix:announcements', announcements)
+          markAnnouncementsAsShown(DATA_DIR, announcements)
+        }
+      } catch (e) { console.error('fix announcer falhou:', e?.message) }
+    }, 4000)
   })
 })
 
@@ -504,11 +515,19 @@ async function runJobNow(job) {
     // Erro classificado é REGISTRADO no servidor VPS (errors.jsonl) — sem
     // notificação por WhatsApp. O cliente conversa com a TamoIA pelo botão
     // "Pedir ajuda" e ela já lê os logs e responde direto.
+    // Também é gravado localmente em fix-history.json pro app avisar
+    // "esse problema foi resolvido" quando o auto-update aplicar o fix.
     try {
       const { classifyError, registerError } = await import('./src/supportAgent.mjs')
       const cls = classifyError(e.message || '')
       if (cls) {
         const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'))
+        // 1. Local: marca historico pro aviso de fix
+        try {
+          const { recordErrorOccurrence } = await import('./src/fixAnnouncer.mjs')
+          recordErrorOccurrence(DATA_DIR, cls.kind)
+        } catch {}
+        // 2. Remoto: registra no VPS pra TamoIA poder consultar
         registerError({
           kind: cls.kind,
           summary: cls.summary,
@@ -516,6 +535,7 @@ async function runJobNow(job) {
             appVersion: pkg.version,
             account: job.account || '?',
             platform: job.platform || '?',
+            category: cls.category || 'unknown',
             lastError: e.message?.slice(0, 200),
           },
         }).catch(() => {})

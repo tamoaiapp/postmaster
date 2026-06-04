@@ -271,6 +271,62 @@
 
 <script src="app.js"></script>
 
+<!-- ─── Aviso de fix aplicado (toast bonito) ─── -->
+<script>
+(function(){
+  if (!window.api?.on) return
+  window.api.on('fix:announcements', (list) => {
+    if (!Array.isArray(list) || !list.length) return
+    list.forEach((a, i) => {
+      setTimeout(() => showFixToast(a), i * 800)
+    })
+  })
+  function showFixToast({ kind, message, fixedInVersion, hadErrorCount }) {
+    let container = document.getElementById('fix-toast-container')
+    if (!container) {
+      container = document.createElement('div')
+      container.id = 'fix-toast-container'
+      container.style.cssText = 'position:fixed;top:70px;right:18px;z-index:10000;display:flex;flex-direction:column;gap:10px;max-width:380px;font-family:Segoe UI,sans-serif'
+      document.body.appendChild(container)
+    }
+    const card = document.createElement('div')
+    card.style.cssText = `
+      background:linear-gradient(135deg,rgba(22,199,132,0.16),rgba(16,185,129,0.06));
+      border:1px solid rgba(22,199,132,0.4);
+      border-radius:14px;padding:14px 16px;color:#eef2f9;
+      box-shadow:0 8px 32px rgba(0,0,0,0.4);
+      transform:translateX(420px);opacity:0;
+      transition:transform .35s ease,opacity .35s ease;
+    `
+    const occ = hadErrorCount > 1 ? ` (você teve esse erro ${hadErrorCount}x)` : ''
+    card.innerHTML = `
+      <div style="display:flex;align-items:flex-start;gap:10px">
+        <div style="font-size:1.4rem;line-height:1;margin-top:2px">🎉</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:800;font-size:.93rem;color:#16c784;margin-bottom:4px">Problema resolvido${occ}</div>
+          <div style="font-size:.85rem;color:#c8d6f0;line-height:1.5">${escapeHtml(message)}</div>
+          <div style="font-size:.7rem;color:#4e5c72;margin-top:6px">A atualização <strong>v${fixedInVersion}</strong> que veio agora já corrigiu. Pode tentar postar de novo.</div>
+        </div>
+        <button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;color:#8394b0;cursor:pointer;font-size:18px;line-height:1;padding:0 4px;align-self:flex-start">×</button>
+      </div>
+    `
+    container.appendChild(card)
+    requestAnimationFrame(() => {
+      card.style.transform = 'translateX(0)'
+      card.style.opacity = '1'
+    })
+    setTimeout(() => {
+      card.style.transform = 'translateX(420px)'
+      card.style.opacity = '0'
+      setTimeout(() => card.remove(), 400)
+    }, 12000)
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+  }
+})()
+</script>
+
 <!-- ─── TamoIA Suporte (isolated script) ─── -->
 <script>
 (function(){

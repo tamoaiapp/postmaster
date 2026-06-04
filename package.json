@@ -1,6 +1,6 @@
 {
     "name":  "postmaster",
-    "version":  "1.0.42",
+    "version":  "1.0.43",
     "description":  "Automação de postagem com IA local",
     "main":  "main.js",
     "scripts":  {

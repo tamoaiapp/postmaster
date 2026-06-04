@@ -130,29 +130,112 @@ export async function registerError({ kind, summary, context = {} }) {
 }
 
 /**
- * Classifica uma mensagem de erro do jobRunner em um "kind".
- * Retorna { kind, summary } ou null se nao for bug classificavel
- * (ex: erro temporario do cliente, sem internet, conta deslogada).
+ * Classifica uma mensagem de erro do jobRunner.
+ *
+ * category indica o tipo do erro:
+ *  - 'bug_app'         → bug do PostMaster. Cliente nao causou. A TamoIA registra e
+ *                        avisa que vai ser corrigido em update (auto-update pega).
+ *  - 'cliente_config'  → cliente configurou algo errado. TamoIA explica e ajuda
+ *                        a corrigir. Nao precisa update do app, e so ajustar.
+ *  - 'cliente_externo' → algo fora do controle do app E do cliente (conta deslogou,
+ *                        plataforma fora do ar, internet caiu). TamoIA orienta.
+ *
+ * Retorna { kind, category, summary, fix } ou null se nao classificavel.
  */
 export function classifyError(errMsg) {
   const m = String(errMsg || '').toLowerCase()
-  if (m.includes('ig_rejected_video') || m.includes('este arquivo de v') || m.includes('could not be played')) {
-    return { kind: 'ig_rejected_video', summary: 'Instagram rejeitou o video (codec/container incompativel)' }
+
+  // ── Erros de configuracao do cliente (TamoIA ajuda a corrigir) ──────────
+  if (m.includes('config_youtube_url_is_video')) {
+    return {
+      kind: 'config_youtube_url_is_video',
+      category: 'cliente_config',
+      summary: 'Cliente colou link de video especifico no campo de canal',
+      fix: 'Trocar pelo link do CANAL (ex: youtube.com/@nomedocanal — sem o /watch?v=...). Edita a automacao em "Automacoes" e cola a URL do canal todo.',
+    }
   }
-  if (m.includes("chrome-headless-shell") && m.includes("doesn't exist")) {
-    return { kind: 'tt_chrome_headless_missing', summary: 'chrome-headless-shell.exe nao foi empacotado no installer' }
-  }
-  if (m.includes('botão next/avançar não encontrado') || m.includes('botao next/avancar nao encontrado')) {
-    return { kind: 'ig_next_button_not_found', summary: 'IG nao apresentou botao Avancar (provavel rejeicao de video silenciosa)' }
-  }
-  if (m.includes('react-joyride') && m.includes('intercepts')) {
-    return { kind: 'tt_joyride_blocking', summary: 'Tour onboarding TikTok bloqueando clicks' }
+  if (m.includes('nenhuma url de canal configurada')) {
+    return {
+      kind: 'config_no_source_url',
+      category: 'cliente_config',
+      summary: 'Job sem URL de fonte (canal/perfil) configurada',
+      fix: 'Vai em "Automacoes", edita o job e cola pelo menos uma URL no campo de fonte.',
+    }
   }
   if (m.includes('enotdir') && m.includes('scandir')) {
-    return { kind: 'manual_source_notdir', summary: 'Cliente apontou arquivo .mp4 onde devia ser pasta' }
+    return {
+      kind: 'manual_source_notdir',
+      category: 'cliente_config',
+      summary: 'Cliente apontou arquivo .mp4 onde devia ser pasta',
+      fix: 'Edita o job e seleciona a PASTA que contem os videos, nao um arquivo especifico. (A partir da v1.0.32 o app aceita os dois — se ainda da esse erro, atualize.)',
+    }
+  }
+  if (m.includes('sessao nao encontrada') || m.includes('sessão não encontrada')) {
+    return {
+      kind: 'session_expired',
+      category: 'cliente_externo',
+      summary: 'Sessao da conta IG/TikTok expirou ou foi derrubada',
+      fix: 'Vai em "Contas" e clica em "Fazer login de novo" naquela conta. As vezes o IG/TT pede um codigo de verificacao por email/SMS — confirma quando aparecer.',
+    }
+  }
+  if (m.includes('pasta de vídeos não configurada') || m.includes('pasta de videos nao configurada')) {
+    return {
+      kind: 'config_no_source_folder',
+      category: 'cliente_config',
+      summary: 'Job tipo "Pasta" sem pasta apontada',
+      fix: 'Edita o job e clica em "Selecionar pasta" — aponta pra onde os videos estao no PC.',
+    }
+  }
+
+  // ── Bugs do app (precisam fix em codigo + nova release) ─────────────────
+  if (m.includes('ig_rejected_video') || m.includes('este arquivo de v') || m.includes('could not be played')) {
+    return {
+      kind: 'ig_rejected_video',
+      category: 'bug_app',
+      summary: 'Instagram rejeitou o video (codec/container incompativel)',
+      fix: null,
+    }
+  }
+  if (m.includes("chrome-headless-shell") && m.includes("doesn't exist")) {
+    return {
+      kind: 'tt_chrome_headless_missing',
+      category: 'bug_app',
+      summary: 'chrome-headless-shell.exe nao foi empacotado no installer',
+      fix: null,
+    }
+  }
+  if (m.includes('botão next/avançar não encontrado') || m.includes('botao next/avancar nao encontrado')) {
+    return {
+      kind: 'ig_next_button_not_found',
+      category: 'bug_app',
+      summary: 'IG nao apresentou botao Avancar (provavel rejeicao de video silenciosa)',
+      fix: null,
+    }
+  }
+  if (m.includes('react-joyride') && m.includes('intercepts')) {
+    return {
+      kind: 'tt_joyride_blocking',
+      category: 'bug_app',
+      summary: 'Tour onboarding TikTok bloqueando clicks',
+      fix: null,
+    }
   }
   if (m.includes('executable doesn\'t exist') && m.includes('chrome')) {
-    return { kind: 'playwright_chrome_missing', summary: 'Playwright nao acha chrome no installer' }
+    return {
+      kind: 'playwright_chrome_missing',
+      category: 'bug_app',
+      summary: 'Playwright nao acha chrome no installer',
+      fix: null,
+    }
+  }
+  if ((m.includes('requested format') && m.includes('not available')) ||
+      (m.includes('challenge solving failed') && m.includes('javascript'))) {
+    return {
+      kind: 'yt_n_challenge_failed',
+      category: 'bug_app',
+      summary: 'yt-dlp falhou no n-challenge do YouTube (deno.exe ausente?)',
+      fix: null,
+    }
   }
   return null
 }
