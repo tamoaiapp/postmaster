@@ -134,10 +134,30 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
     })
     await fileInput.setInputFiles(videoPath)
     log('📎 Arquivo selecionado')
-    await delay(5000)
+    await delay(3000)
 
-    // Aguarda preview
-    await page.waitForSelector('video', { timeout: 60000 }).catch(() => {})
+    // ROOT CAUSE (descoberto pelo user em 2026-06-05): o upload terminar de
+    // enviar nao significa que pode publicar. TikTok ainda processa server-side
+    // (capa "Carregando...", transcoding, validacao) por 30-180s. Durante esse
+    // tempo o botao Publicar NAO EXISTE no DOM — se a gente tentar clicar agora
+    // o TikTok mostra "Algo deu errado / Tentar novamente". Era o que aparecia
+    // em todos os fails. Agora aguarda o data-e2e=post_video_button aparecer
+    // visivel + enabled, com timeout de 3min (vale ate pra video grande).
+    log('⏳ Aguardando TikTok processar o video (pode levar ate 3min)...')
+    liveView.updateStatus(liveJobId, 'TikTok processando')
+    try {
+      await page.waitForFunction(() => {
+        const el = document.querySelector('[data-e2e="post_video_button"], [data-e2e="publish-button"], [data-e2e*="post_video"]')
+        if (!el) return false
+        if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false
+        const r = el.getBoundingClientRect()
+        return r.width > 30 && r.height > 16
+      }, { timeout: 180000, polling: 1500 })
+      log('✅ TikTok terminou de processar')
+    } catch (e) {
+      log('⚠️ TikTok demorou >3min processando. Pode ser video muito grande ou rede lenta.')
+      // Segue tentando — talvez apareca nos retries do bloco proximo
+    }
     await delay(2000)
 
     // DISPENSA popups que aparecem após upload (analise IA, AI tools, tour, etc)
