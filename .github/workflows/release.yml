@@ -89,9 +89,9 @@ jobs:
               if ($size -gt 10MB -and $bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4B) {
                 $ok = $true; break
               }
-              Write-Host "Tentativa $i: download invalido (${size} bytes, magic $($bytes -join ','))"
+              Write-Host "Tentativa ${i}: download invalido (${size} bytes, magic $($bytes -join ','))"
             } catch {
-              Write-Host "Tentativa $i falhou: $($_.Exception.Message)"
+              Write-Host "Tentativa ${i} falhou: $($_.Exception.Message)"
             }
             Start-Sleep -Seconds (5 * $i)
           }
@@ -116,9 +116,9 @@ jobs:
               if ($size -gt 5MB -and $bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A) {
                 $ok = $true; break
               }
-              Write-Host "Tentativa $i: download invalido (${size} bytes, magic $($bytes -join ','))"
+              Write-Host "Tentativa ${i}: download invalido (${size} bytes, magic $($bytes -join ','))"
             } catch {
-              Write-Host "Tentativa $i falhou: $($_.Exception.Message)"
+              Write-Host "Tentativa ${i} falhou: $($_.Exception.Message)"
             }
             Start-Sleep -Seconds (5 * $i)
           }
