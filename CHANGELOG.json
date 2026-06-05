@@ -3,11 +3,20 @@
     "_doc":  "Lista de versoes com os kinds de erro que cada uma corrige. O app baixa esse JSON, verifica se o cliente teve algum desses erros recentemente, e mostra toast quando o auto-update aplicar o fix. Fonte: src/supportAgent.mjs classifyError().",
     "versions":  [
                      {
+                         "version":  "1.0.47",
+                         "fixed":  [
+                                       {
+                                           "kind":  "tt_post_button_failed",
+                                           "message":  "Botao Post do TikTok ainda nao encontrado na 1.0.46 � texto exato nao casava porque o botao vem empacotado com SVG/spinner. Agora usa 5 estrategias em fallback: data-e2e, aria-label, texto contem \u0027post/publish/postar\u0027, form[type=submit] e cor primaria. Salva screenshot+JSON em userData/debug/ quando todas falham, pra TamoIA debugar offline."
+                                       }
+                                   ]
+                     },
+                     {
                          "version":  "1.0.46",
                          "fixed":  [
                                        {
                                            "kind":  "tt_post_button_failed",
-                                           "message":  "Postagem no TikTok travava em 'Botão Post não encontrado'. O seletor antigo pegava qualquer botão com texto 'Post' (ex: 'Post a comment') ou clicava enquanto o upload ainda processava. Agora detecta texto exato + espera upload terminar + scroll até o botão + fallback de JS click. 5 tentativas (era 3)."
+                                           "message":  "Postagem no TikTok travava em \u0027Botão Post não encontrado\u0027. O seletor antigo pegava qualquer botão com texto \u0027Post\u0027 (ex: \u0027Post a comment\u0027) ou clicava enquanto o upload ainda processava. Agora detecta texto exato + espera upload terminar + scroll até o botão + fallback de JS click. 5 tentativas (era 3)."
                                        }
                                    ]
                      },

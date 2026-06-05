@@ -166,12 +166,13 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
       await delay(1000)
     }
 
-    // Post button — robusto contra: seletor errado pegando "Post a comment",
-    // upload ainda em andamento (botao disabled), overlay re-renderizado, footer
-    // fora da viewport. v1.0.46+: usa data-e2e estavel, texto EXATO, scroll, e
-    // fallback de keyboard.
+    // Post button — v1.0.47: 5 estrategias em fallback (data-e2e, aria-label,
+    // texto contains, type=submit, ultimo botao do form) + captura de debug
+    // (screenshot+HTML) quando todas falham. Antes era so texto EXATO, mas o
+    // TikTok empacota o texto com SVG/spinner e nao bateu.
     let posted = false
     const MAX_ATTEMPTS = 5
+    let lastDebug = null
     for (let tentativa = 1; tentativa <= MAX_ATTEMPTS && !posted; tentativa++) {
       try {
         // 1. Dispensa popups + scroll pro footer do modal de publicacao
@@ -179,25 +180,18 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
           document.querySelectorAll('[data-floating-ui-portal], #react-joyride-portal, #react-joyride__portal').forEach(el => {
             try { el.remove() } catch {}
           })
-          // Scroll pro fim do form de publicacao (botao Post fica no rodape)
           const main = document.querySelector('main, [class*="ContentForm"], [class*="UploadCard"]')
           if (main) main.scrollTop = main.scrollHeight
           window.scrollTo(0, document.body.scrollHeight)
         }).catch(() => {})
         await delay(1200)
 
-        // 2. Aguarda upload terminar (botao fica disabled durante upload)
+        // 2. Aguarda upload terminar (detecta porcentagem ou texto de progresso)
         const uploadInProgress = await page.evaluate(() => {
-          // Procura indicadores: "uploading", "carregando", "%", spinner ativo
           const text = (document.body.innerText || '').toLowerCase()
-          if (/uploading|carregando|loading\s*\d+%/.test(text)) return true
-          // Botao Post com aria-disabled
-          const btns = Array.from(document.querySelectorAll('button, [role="button"]'))
-          const postBtn = btns.find(b => {
-            const t = (b.innerText || '').trim().toLowerCase()
-            return t === 'post' || t === 'publicar' || t === 'postar'
-          })
-          if (postBtn && (postBtn.disabled || postBtn.getAttribute('aria-disabled') === 'true')) return true
+          // Indicadores de upload em andamento
+          if (/uploading.*\d+%|carregando.*\d+%|loading\s*\d+%/.test(text)) return true
+          if (/\b(uploading|carregando|fazendo upload)\b/.test(text) && !/upload(ed|ado|ou)/.test(text)) return true
           return false
         })
         if (uploadInProgress) {
@@ -206,46 +200,137 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
           continue
         }
 
-        // 3. Acha o botao Post REAL — texto EXATO + dentro de container de publicacao
-        // (evita "Post a comment", "Posts", "Postagens" do menu lateral)
-        const btnHandle = await page.evaluateHandle(() => {
-          // Estrategia 1: data-e2e (mais estavel quando existe)
-          const e2e = document.querySelector('[data-e2e="post_video_button"], [data-e2e="publish-button"], [data-e2e="post-button"]')
-          if (e2e && !e2e.disabled && e2e.getAttribute('aria-disabled') !== 'true') return e2e
-          // Estrategia 2: button com texto EXATO Post/Publicar (case-insensitive, trim)
-          const all = Array.from(document.querySelectorAll('button, [role="button"], div[class*="Button"]'))
-          // Filtra: precisa texto exato + estar visivel + nao disabled
-          const candidates = all.filter(el => {
-            const t = (el.innerText || '').trim().toLowerCase()
-            if (t !== 'post' && t !== 'publicar' && t !== 'postar') return false
+        // 3. Multipla estrategia de detecao do botao Post — em ordem de confianca
+        const found = await page.evaluate(() => {
+          const isVisible = (el) => {
+            if (!el) return false
             const r = el.getBoundingClientRect()
-            if (r.width < 40 || r.height < 20) return false // muito pequeno = nao eh botao real
-            if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false
+            if (r.width < 30 || r.height < 16) return false
+            const s = getComputedStyle(el)
+            if (s.display === 'none' || s.visibility === 'hidden' || parseFloat(s.opacity) < 0.1) return false
             return true
+          }
+          const isClickable = (el) => {
+            if (el.disabled) return false
+            if (el.getAttribute('aria-disabled') === 'true') return false
+            return true
+          }
+          // ── Estrategia 1: data-e2e contendo "post"/"publish"/"submit"
+          const e2eSelectors = [
+            '[data-e2e="post_video_button"]', '[data-e2e="publish-button"]', '[data-e2e="post-button"]',
+            '[data-e2e*="post_video"]', '[data-e2e*="publish"]', '[data-e2e*="submit"]',
+          ]
+          for (const sel of e2eSelectors) {
+            const el = document.querySelector(sel)
+            if (el && isVisible(el) && isClickable(el)) return { el, strategy: `e2e:${sel}` }
+          }
+          // ── Estrategia 2: aria-label = post/publish/publicar/postar (case-insensitive)
+          const aria = Array.from(document.querySelectorAll('[aria-label]')).filter(el => {
+            const a = (el.getAttribute('aria-label') || '').trim().toLowerCase()
+            if (!/^(post|publish|publicar|postar)( now| agora)?$/.test(a)) return false
+            return isVisible(el) && isClickable(el)
           })
-          // Prioriza o que ta no footer/rodape do form (mais a baixo na pagina)
-          candidates.sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top)
-          return candidates[0] || null
+          if (aria.length > 0) {
+            aria.sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)
+            return { el: aria[0], strategy: 'aria-label' }
+          }
+          // ── Estrategia 3: texto innerText/textContent CONTAINS palavras-chave
+          // (mais permissivo — TikTok pode ter "Post agora", "Publish now", etc)
+          const all = Array.from(document.querySelectorAll('button, [role="button"], div[class*="Button"], div[tabindex]'))
+          const textCandidates = all.filter(el => {
+            const inner = (el.innerText || '').trim().toLowerCase().replace(/\s+/g, ' ')
+            const tc = (el.textContent || '').trim().toLowerCase().replace(/\s+/g, ' ')
+            const t = inner || tc
+            // Match: exato, "post now", "publicar agora", "postar", "publish"
+            const matches = /^(post|publish|publicar|postar)( (now|agora))?$/.test(t)
+            if (!matches) return false
+            return isVisible(el) && isClickable(el)
+          })
+          if (textCandidates.length > 0) {
+            // Prioriza o que esta MAIS A BAIXO + MAIS A DIREITA (rodape do form)
+            textCandidates.sort((a, b) => {
+              const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect()
+              if (Math.abs(ra.top - rb.top) > 50) return rb.top - ra.top
+              return rb.left - ra.left
+            })
+            return { el: textCandidates[0], strategy: 'text-contains' }
+          }
+          // ── Estrategia 4: button[type=submit] dentro de form com input file
+          const forms = Array.from(document.querySelectorAll('form')).filter(f => f.querySelector('input[type="file"], video'))
+          for (const f of forms) {
+            const submit = f.querySelector('button[type="submit"]:not([disabled])')
+            if (submit && isVisible(submit) && isClickable(submit)) return { el: submit, strategy: 'form-submit' }
+          }
+          // ── Estrategia 5: botao "primario" mais a baixo (heuristica visual)
+          // Procura buttons com background colorido (vermelho TikTok #FE2C55, ou solido)
+          const primaryBtns = all.filter(el => {
+            if (!isVisible(el) || !isClickable(el)) return false
+            const s = getComputedStyle(el)
+            const bg = s.backgroundColor
+            // Vermelho TikTok ou rosa magenta ou qualquer cor RGB nao-transparente
+            if (bg.includes('254, 44, 85') || bg.includes('254,44,85')) return true // FE2C55
+            if (/rgb\((25[0-5]|2[0-4]\d|1\d\d), \d+, \d+\)/.test(bg)) return true // vermelho-ish
+            return false
+          })
+          if (primaryBtns.length > 0) {
+            primaryBtns.sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)
+            return { el: primaryBtns[0], strategy: 'primary-color' }
+          }
+          return null
         })
-        const el = btnHandle.asElement()
-        if (!el) {
-          await btnHandle.dispose?.()
-          throw new Error('Botão Post não encontrado (sem candidato com texto exato)')
+
+        if (!found) {
+          // Captura debug pra inspecao offline
+          lastDebug = await page.evaluate(() => {
+            const all = Array.from(document.querySelectorAll('button, [role="button"]'))
+            return {
+              url: location.href,
+              buttonsCount: all.length,
+              firstButtons: all.slice(0, 30).map(el => ({
+                tag: el.tagName,
+                text: (el.innerText || el.textContent || '').trim().slice(0, 40),
+                ariaLabel: el.getAttribute('aria-label'),
+                dataE2e: el.getAttribute('data-e2e'),
+                disabled: el.disabled || el.getAttribute('aria-disabled') === 'true',
+                rect: (() => { const r = el.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) } })(),
+              })),
+            }
+          }).catch(() => null)
+          throw new Error('Botão Post não encontrado (5 estrategias falharam)')
         }
 
-        // 4. Scroll ate o botao + click via JS (evita overlay)
+        const handle = await page.evaluateHandle(({ strategy }) => {
+          // Re-acha pelo strategy retornado (evita serializar el)
+          // Usa MutationObserver-friendly: refaz a busca completa
+          const sels = {
+            'e2e:[data-e2e="post_video_button"]': () => document.querySelector('[data-e2e="post_video_button"]'),
+          }
+          if (sels[strategy]) return sels[strategy]()
+          // Fallback: pega o ultimo botao visivel com texto que match
+          const all = Array.from(document.querySelectorAll('button, [role="button"], div[class*="Button"], div[tabindex]'))
+          const match = all.filter(el => {
+            const t = (el.innerText || el.textContent || '').trim().toLowerCase().replace(/\s+/g, ' ')
+            return /^(post|publish|publicar|postar)( (now|agora))?$/.test(t) ||
+                   /^(post|publish|publicar|postar)$/i.test((el.getAttribute('aria-label') || '').trim())
+          })
+          match.sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)
+          return match[0] || null
+        }, { strategy: found.strategy })
+
+        const el = handle.asElement()
+        if (!el) throw new Error('handle perdido entre evaluate e click')
+
+        log(`   tentativa ${tentativa}: achei via ${found.strategy}`)
         await el.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {})
         await delay(500)
-        // Tenta click nativo do Playwright primeiro (force=true)
         try {
           await el.click({ force: true, timeout: 8000 })
           posted = true
           log(`📤 Publicando... (tentativa ${tentativa})`)
         } catch (clickErr) {
-          // Fallback: dispatch JS click event direto (ignora qualquer overlay)
+          // Fallback: JS click direto
           await page.evaluate((node) => node.click(), el).catch(() => {})
           await delay(1500)
-          // Confirma se de fato saiu da pagina de upload
           const stillOnUpload = await page.evaluate(() => {
             return /\/upload|\/creator-center\/upload/.test(location.pathname) &&
                    !!document.querySelector('[data-e2e="post_video_button"], input[type="file"]')
@@ -263,7 +348,23 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
         await delay(1500)
       }
     }
-    if (!posted) throw new Error('tt_post_button_failed: TikTok mudou o layout do botao Post ou upload travou. App vai detectar e arrumar em update.')
+
+    if (!posted) {
+      // Salva debug pra cliente compartilhar com TamoIA
+      try {
+        const debugDir = path.join(dataDir, 'debug')
+        fs.mkdirSync(debugDir, { recursive: true })
+        const ts = new Date().toISOString().replace(/[:.]/g, '-')
+        const pngPath = path.join(debugDir, `tt-post-fail-${ts}.png`)
+        const jsonPath = path.join(debugDir, `tt-post-fail-${ts}.json`)
+        await page.screenshot({ path: pngPath, fullPage: true }).catch(() => {})
+        fs.writeFileSync(jsonPath, JSON.stringify({ ts, url: page.url(), debug: lastDebug }, null, 2))
+        log(`   debug salvo: ${pngPath}`)
+      } catch (debugErr) {
+        log(`   nao salvou debug: ${debugErr.message.slice(0, 60)}`)
+      }
+      throw new Error('tt_post_button_failed: TikTok mudou o layout do botao Post ou upload travou. App vai detectar e arrumar em update.')
+    }
     liveView.updateStatus(liveJobId, 'Publicando')
 
     // Aguarda confirmação — TikTok redireciona pra /tiktokstudio/content e mostra "Vídeo publicado"
