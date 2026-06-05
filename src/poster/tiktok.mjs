@@ -6,7 +6,6 @@ import { chromium } from 'playwright'
 import fs from 'fs'
 import path from 'path'
 import * as liveView from '../liveView.mjs'
-import { getChromiumExe } from '../playwrightExe.mjs'
 
 const delay = ms => new Promise(r => setTimeout(r, ms))
 
@@ -14,12 +13,14 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
   const sessionFile = path.join(dataDir, 'sessions', `tk-${account}.json`)
   if (!fs.existsSync(sessionFile)) throw new Error(`Sessão não encontrada para @${account}. Faça login primeiro.`)
 
+  // NAO passa executablePath — quando passamos explicitamente, Playwright
+  // trata como "Chrome do user" e PARA de aplicar os args internos de
+  // bypass de detecao automatica (que sao DIFERENTES do --disable-blink-features
+  // que passamos manualmente). Sem esses args internos, TikTok detecta bot e
+  // bloqueia o upload silenciosamente — provado isolando em teste local.
+  // main.js seta PLAYWRIGHT_BROWSERS_PATH apontando pro chromium-XXXX bundlado.
   const browser = await chromium.launch({
     headless: true,
-    executablePath: getChromiumExe() || undefined,
-    // --disable-blink-features=AutomationControlled tira o sinal mais facil
-    // de detecao de Playwright. Era ROOT CAUSE do botao Post nao aparecer:
-    // TikTok detectava bot e bloqueava o fluxo de upload silenciosamente.
     args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
   })
   const ctx = await browser.newContext({
@@ -31,21 +32,13 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
   })
 
   // Stealth — mascara sinais que TikTok usa pra detectar bot.
-  // Sem isso, navigator.webdriver=true vaza, upload "completa" mas React
-  // nunca processa o video, ai botao Publicar nunca aparece.
+  // Versao validada localmente que funciona em headless: sem
+  // permissions.query override (causava algum bug que quebrava upload).
   await ctx.addInitScript(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
     Object.defineProperty(navigator, 'plugins', { get: () => [{ name: 'PDF Viewer' }, { name: 'Chrome PDF Viewer' }] })
     Object.defineProperty(navigator, 'languages', { get: () => ['pt-BR', 'pt', 'en-US', 'en'] })
     window.chrome = { runtime: {} }
-    // Mascara navigator.permissions.query (TikTok consulta notification permission)
-    const originalQuery = window.navigator.permissions?.query
-    if (originalQuery) {
-      window.navigator.permissions.query = (params) =>
-        params.name === 'notifications'
-          ? Promise.resolve({ state: Notification.permission, onchange: null, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => true })
-          : originalQuery(params)
-    }
   })
 
   const page = await ctx.newPage()
@@ -62,11 +55,11 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
   // overlay milissegundos depois (foi exatamente o que travou o post do cliente: o overlay
   // voltava entre o dispensar e o click da legenda). CSS aplica antes da pintura e sobrevive.
   const installAntiOverlayCss = async () => {
+    // Restrito a IDs especificos do react-joyride. NAO usar [data-test-id="overlay"]
+    // — TikTok Studio usa isso em componentes nativos (modal de publicacao!) e
+    // esconder bloqueava o fluxo todo. Removido em v1.0.51.
     await page.addStyleTag({ content: `
-      #react-joyride-portal, #react-joyride__portal,
-      .react-joyride__overlay, [data-test-id="overlay"],
-      .react-joyride__spotlight, .react-joyride__beacon,
-      .react-joyride__tooltip {
+      #react-joyride-portal, #react-joyride__portal {
         display: none !important;
         pointer-events: none !important;
         visibility: hidden !important;
@@ -124,8 +117,11 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
     liveView.updateStatus(liveJobId, 'Abrindo TikTok')
     await page.goto('https://www.tiktok.com/tiktokstudio/upload', { waitUntil: 'domcontentloaded', timeout: 40000 })
     await delay(3000)
-    // Remove tour onboarding ANTES do upload (pode aparecer logo na primeira visita)
-    await dispensarOverlays()
+    // NAO faz dispensarOverlays() aqui — o CSS injetado anti-joyride esconde
+    // [data-test-id="overlay"] que tambem eh usado pelo componente de upload
+    // do TikTok. Isso bloqueava o setInputFiles silenciosamente. O joyride
+    // que aparece apos o upload eh removido pelo dispensarOverlays() chamado
+    // mais abaixo (linha ~155), entao nao tem prejuizo.
 
     // Upload file — TikTok esconde o input com display:none, mas Playwright
     // setInputFiles funciona em elementos hidden. waitForSelector default espera

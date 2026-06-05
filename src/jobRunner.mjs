@@ -26,6 +26,7 @@ import { postReelInstagram } from './poster/instagram.mjs'
 import { postVideoTikTok }   from './poster/tiktok.mjs'
 import { gerarCaption }      from './caption/ollama.mjs'
 import * as liveView         from './liveView.mjs'
+import { appendOutroToReel } from './outroAppend.mjs'
 
 export default async function jobRunner(job, dataDir, log) {
   // Registra a sessao no Live View desde o inicio (mesmo sem browser aberto ainda)
@@ -319,6 +320,20 @@ export default async function jobRunner(job, dataDir, log) {
     caption = videoMeta.titulo || ''
   } else {
     caption = ''
+  }
+
+  // ── Anexar outro (foto/video de divulgacao) se configurado ───────────────────
+  if (job.outroType && job.outroType !== 'none' && job.outroPath) {
+    try {
+      videoPath = await appendOutroToReel(videoPath, {
+        type: job.outroType,
+        outroPath: job.outroPath,
+        durationSec: job.outroDurationSec || 3,
+        log,
+      })
+    } catch (e) {
+      log(`⚠️ Falha ao anexar outro (segue sem): ${e.message.slice(0, 80)}`)
+    }
   }
 
   // ── Postar ───────────────────────────────────────────────────────────────────
