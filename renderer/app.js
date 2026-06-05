@@ -763,6 +763,7 @@ async function editJob(id) {
     filterOnlyNew: true, filterMaxVideos: 20,
     cutType: 'smart', editMode: 'auto',
     watermarkType: 'none', watermarkText: '', watermarkImagePath: '', watermarkPosition: 'br',
+    outroType: 'none', outroPath: '', outroDurationSec: 3,
     captionType: 'ai', captionTemplate: '', captionNiche: '',
     scheduleType: 'interval', intervalMin: 60, timeWindows: '08:00-22:00',
     autoStart: true,
@@ -794,6 +795,8 @@ function openWizard() {
     cutType: 'smart', // 'smart' | 'full'
     editMode: 'auto', // 'auto' (edição IA estilo TikTok) | 'original' (vídeo + thumb)
     watermarkType: 'none', watermarkText: '', watermarkImagePath: '', watermarkPosition: 'br',
+    // Anexo no final (divulgar produto/servico): cola foto/video no fim do reel
+    outroType: 'none', outroPath: '', outroDurationSec: 3,
     // Legenda
     captionType: 'ai', captionTemplate: '', captionNiche: '',
     // Agendamento
@@ -830,6 +833,8 @@ function syncDOMToWizard() {
     'wiz-only-new': ['filterOnlyNew', 'check'],
     'wiz-wm-text': ['watermarkText', 'text'],
     'wiz-wm-image': ['watermarkImagePath', 'text'],
+    'wiz-outro-path': ['outroPath', 'text'],
+    'wiz-outro-dur': ['outroDurationSec', 'int'],
     'wiz-caption-niche': ['captionNiche', 'text'],
     'wiz-caption-template': ['captionTemplate', 'text'],
     'wiz-interval': ['intervalMin', 'int'],
@@ -1010,6 +1015,48 @@ function getWizardBody(step) {
           </div>
         ` : ''}
       </div>
+
+      <div class="filter-section">
+        <div class="filter-section-title">📢 Anexar no final (opcional)</div>
+        <div class="text-sm text-muted" style="margin-bottom:10px">
+          Cola uma foto ou vídeo curto no final de cada postagem — pra divulgar produto, oferta, link da bio, etc.
+        </div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label>Tipo</label>
+          <select id="wiz-outro-type" onchange="wizardData.outroType=this.value;renderWizardStep()">
+            <option value="none" ${(!wizardData.outroType||wizardData.outroType==='none')?'selected':''}>Nenhum</option>
+            <option value="image" ${wizardData.outroType==='image'?'selected':''}>🖼️ Foto (X segundos)</option>
+            <option value="video" ${wizardData.outroType==='video'?'selected':''}>🎬 Vídeo curto</option>
+          </select>
+        </div>
+        ${wizardData.outroType === 'image' ? `
+          <div class="form-group">
+            <label>Imagem (JPG ou PNG)</label>
+            <div style="display:flex;gap:8px">
+              <input type="text" id="wiz-outro-path" value="${esc(wizardData.outroPath||'')}" placeholder="C:\\caminho\\divulgacao.jpg" style="flex:1">
+              <button class="btn btn-ghost btn-sm" onclick="pickOutroImage()">📂 Escolher</button>
+            </div>
+            <span class="text-sm text-muted">Será centralizada em fundo preto no formato 9:16 (1080×1920)</span>
+          </div>
+          <div class="form-group">
+            <label>Duração</label>
+            <div style="display:flex;align-items:center;gap:8px">
+              <input type="number" id="wiz-outro-dur" value="${wizardData.outroDurationSec || 3}" min="1" max="15" style="width:80px">
+              <span class="text-muted text-sm">segundos (1–15)</span>
+            </div>
+          </div>
+        ` : ''}
+        ${wizardData.outroType === 'video' ? `
+          <div class="form-group">
+            <label>Vídeo (MP4)</label>
+            <div style="display:flex;gap:8px">
+              <input type="text" id="wiz-outro-path" value="${esc(wizardData.outroPath||'')}" placeholder="C:\\caminho\\divulgacao.mp4" style="flex:1">
+              <button class="btn btn-ghost btn-sm" onclick="pickOutroVideo()">📂 Escolher</button>
+            </div>
+            <span class="text-sm text-muted">Será convertido pra 9:16 (1080×1920) e concatenado no final</span>
+          </div>
+        ` : ''}
+      </div>
     `
     case 1: return `
       <div id="wiz-account-loading" style="color:var(--muted);text-align:center;padding:20px">
@@ -1179,6 +1226,24 @@ async function pickWatermarkImage() {
   }
 }
 
+async function pickOutroImage() {
+  const p = await window.api.dialog.openFile([{ name: 'Imagem', extensions: ['png', 'jpg', 'jpeg', 'webp'] }])
+  if (p) {
+    wizardData.outroPath = p
+    const el = document.getElementById('wiz-outro-path')
+    if (el) el.value = p
+  }
+}
+
+async function pickOutroVideo() {
+  const p = await window.api.dialog.openFile([{ name: 'Vídeo', extensions: ['mp4', 'mov', 'webm', 'mkv'] }])
+  if (p) {
+    wizardData.outroPath = p
+    const el = document.getElementById('wiz-outro-path')
+    if (el) el.value = p
+  }
+}
+
 async function loadWizardAccounts() {
   const accounts = await window.api.accounts.list()
   const filtered = accounts.filter(a => a.platform === wizardData.platform)
@@ -1219,6 +1284,12 @@ function collectWizardStep(step) {
       wizardData.editMode             = wizardData.editMode || 'auto'
       wizardData.watermarkText        = document.getElementById('wiz-wm-text')?.value || ''
       wizardData.watermarkImagePath   = document.getElementById('wiz-wm-image')?.value || ''
+      // Outro (anexo no final)
+      wizardData.outroPath            = document.getElementById('wiz-outro-path')?.value.trim() || ''
+      wizardData.outroDurationSec     = parseInt(document.getElementById('wiz-outro-dur')?.value || '3') || 3
+      if (wizardData.outroType && wizardData.outroType !== 'none' && !wizardData.outroPath) {
+        toast('Escolha um arquivo pra anexar no final, ou troca pra "Nenhum"', 'err'); return false
+      }
       return true
     case 1:
       wizardData.account = document.getElementById('wiz-account')?.value || ''
