@@ -160,6 +160,32 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
     }
     await delay(2000)
 
+    // FIX v1.0.56 #2: dois modals especificos aparecem JUNTO com o botao Publicar
+    // que precisam ser fechados ANTES de qualquer click. User identificou:
+    //   1. "Novos recursos de edicao adicionados" (centro-direita) → botao "Entendi"
+    //   2. "Ativar verificacoes automaticas de conteudo" (centro) → botao "Cancelar"
+    //      (NAO clicar "Ativar" — usuario pode nao querer)
+    // Se nao fechar, o click no Publicar passa por cima desses overlays e TikTok
+    // mostra "Algo deu errado". Era o erro mais frequente.
+    await page.evaluate(() => {
+      const norm = s => (s || '').trim().toLowerCase()
+      const allButtons = [...document.querySelectorAll('button, [role="button"]')]
+      // Modal 1: "Novos recursos..." → Entendi
+      // Modal 2: "Ativar verificacoes..." → Cancelar (NUNCA "Ativar")
+      const bodyText = norm(document.body.innerText)
+      const hasNovosRecursos = bodyText.includes('novos recursos') || bodyText.includes('new features') || bodyText.includes('recursos de edição')
+      const hasVerificacoes = bodyText.includes('verificações automáticas') || bodyText.includes('automatic checks') || bodyText.includes('content checks')
+      if (hasNovosRecursos) {
+        const entendi = allButtons.find(b => ['entendi', 'got it', 'ok', 'continuar'].includes(norm(b.textContent)))
+        if (entendi) try { entendi.click() } catch {}
+      }
+      if (hasVerificacoes) {
+        const cancelar = allButtons.find(b => ['cancelar', 'cancel', 'agora não', 'agora nao', 'not now'].includes(norm(b.textContent)))
+        if (cancelar) try { cancelar.click() } catch {}
+      }
+    }).catch(() => {})
+    await delay(1500)
+
     // DISPENSA popups que aparecem após upload (analise IA, AI tools, tour, etc)
     // Esses modals interceptam clicks e impedem o botao Post de funcionar.
     log('Dispensando popups e overlays...')
