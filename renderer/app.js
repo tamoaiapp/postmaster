@@ -553,6 +553,7 @@ function buildJobCard(job, compact) {
         ? `<button class="btn btn-ghost btn-sm" onclick="stopJob('${job.id}')">⏹ Parar</button>`
         : `<button class="btn btn-primary btn-sm" onclick="startJob('${job.id}')">▶ Iniciar</button>`}
       <button class="btn btn-ghost btn-sm" onclick="runNow('${job.id}')">⚡ Executar agora</button>
+      <button class="btn btn-ghost btn-sm" onclick="editJob('${job.id}')">✏️ Editar</button>
       <button class="btn btn-ghost btn-sm" onclick="openLogs('${job.id}')">📋 Logs</button>
       <button class="btn btn-danger btn-sm" onclick="deleteJob('${job.id}')">🗑</button>
     </div>`}
@@ -740,7 +741,45 @@ async function removeAccount(id) {
 }
 
 // ── Wizard ────────────────────────────────────────────────────────────────────
+let wizardEditingId = null
+
+async function editJob(id) {
+  const jobs = await window.api.jobs.list()
+  const job = jobs.find(j => j.id === id)
+  if (!job) { toast('Automação não encontrada', 'err'); return }
+  if (job.running) {
+    const ok = await customConfirm('Esta automação está rodando. Parar antes de editar?')
+    if (!ok) return
+    await window.api.jobs.stop(id)
+  }
+  wizardEditingId = id
+  wizardStep = 0
+  // Pre-preenche com TUDO do job (defaults mesclados pra campos novos que job antigo nao tinha)
+  wizardData = {
+    name: '', platform: 'instagram', account: '',
+    source: 'youtube', sourceUrls: '', sourceHandles: '',
+    filterMinDur: 10, filterMaxDur: 3600,
+    filterKeywordInclude: '', filterKeywordExclude: '',
+    filterOnlyNew: true, filterMaxVideos: 20,
+    cutType: 'smart', editMode: 'auto',
+    watermarkType: 'none', watermarkText: '', watermarkImagePath: '', watermarkPosition: 'br',
+    captionType: 'ai', captionTemplate: '', captionNiche: '',
+    scheduleType: 'interval', intervalMin: 60, timeWindows: '08:00-22:00',
+    autoStart: true,
+    ...job, // sobrescreve com os valores reais do job
+  }
+  document.getElementById('wizard-overlay').classList.add('open')
+  document.getElementById('wizard-title').textContent = 'Editar Automação'
+  renderWizardStep()
+  setTimeout(() => {
+    window.focus()
+    const firstInput = document.querySelector('#wizard-body input, #wizard-body textarea, #wizard-body select')
+    if (firstInput) firstInput.focus()
+  }, 80)
+}
+
 function openWizard() {
+  wizardEditingId = null
   wizardStep = 0
   wizardData = {
     name: '', platform: 'instagram', account: '',
@@ -762,6 +801,7 @@ function openWizard() {
     autoStart: true,
   }
   document.getElementById('wizard-overlay').classList.add('open')
+  document.getElementById('wizard-title').textContent = 'Nova Automação'
   renderWizardStep()
   // Garante que a janela e o primeiro input recebem foco (corrige bug pos-confirm nativo)
   setTimeout(() => {
@@ -772,6 +812,7 @@ function openWizard() {
 }
 
 function closeWizard() {
+  wizardEditingId = null
   document.getElementById('wizard-overlay').classList.remove('open')
 }
 
@@ -810,7 +851,9 @@ function renderWizardStep() {
     <div class="wizard-step ${i === wizardStep ? 'active' : i < wizardStep ? 'done' : ''}">${s}</div>`
   ).join('')
   document.getElementById('wizard-back').style.display = wizardStep === 0 ? 'none' : ''
-  document.getElementById('wizard-next').textContent = wizardStep === wizardSteps.length - 1 ? '✅ Criar' : 'Próximo →'
+  document.getElementById('wizard-next').textContent = wizardStep === wizardSteps.length - 1
+    ? (wizardEditingId ? '💾 Salvar' : '✅ Criar')
+    : 'Próximo →'
   document.getElementById('wizard-body').innerHTML = getWizardBody(wizardStep)
 }
 
@@ -1226,15 +1269,30 @@ async function wizardNext() {
   }
 
   if (wizardStep === wizardSteps.length - 1) {
-    const res = await window.api.jobs.create(wizardData)
-    if (res.ok) {
-      toast('Automação criada!', 'ok')
-      closeWizard()
-      if (wizardData.autoStart) await window.api.jobs.start(res.job.id)
-      refreshAll()
-      navigateTo('jobs')
+    if (wizardEditingId) {
+      const res = await window.api.jobs.update({ id: wizardEditingId, ...wizardData })
+      if (res?.ok !== false) {
+        toast('Automação atualizada!', 'ok')
+        const id = wizardEditingId
+        closeWizard()
+        refreshAll()
+        navigateTo('jobs')
+        // Re-inicia se autoStart marcado (parou no inicio do edit)
+        if (wizardData.autoStart) await window.api.jobs.start(id)
+      } else {
+        toast('Erro ao salvar', 'err')
+      }
     } else {
-      toast('Erro ao criar automação', 'err')
+      const res = await window.api.jobs.create(wizardData)
+      if (res.ok) {
+        toast('Automação criada!', 'ok')
+        closeWizard()
+        if (wizardData.autoStart) await window.api.jobs.start(res.job.id)
+        refreshAll()
+        navigateTo('jobs')
+      } else {
+        toast('Erro ao criar automação', 'err')
+      }
     }
     return
   }

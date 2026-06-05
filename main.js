@@ -150,7 +150,9 @@ function setupAutoUpdate() {
     })
 
     autoUpdater.checkForUpdatesAndNotify()
-    setInterval(() => autoUpdater.checkForUpdates(), 60 * 60 * 1000) // checa a cada 1h
+    // Antes era 1h. v1.0.54: 15min — user reportou que app demorava demais
+    // pra notar update novo. Mais agressivo pega update na sessao mesmo.
+    setInterval(() => autoUpdater.checkForUpdates().catch(() => {}), 15 * 60 * 1000)
   } catch (e) {
     console.error('[update] setup falhou:', e?.message)
   }
