@@ -931,7 +931,7 @@ function getWizardBody(step) {
           </div>
         </div>` : ''}
 
-      ${wizardData.source !== 'manual' ? `
+      ${wizardData.source !== 'manual' && wizardData.platform !== 'youtube' ? `
         <div class="filter-section">
           <div class="filter-section-title">✂ Tipo de corte</div>
           <div class="form-group" style="margin-bottom:14px">
