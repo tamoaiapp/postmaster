@@ -113,7 +113,12 @@ export default async function jobRunner(job, dataDir, log) {
 
     // Se editMode='auto', precisamos preservar a VTT pro autoEditor reusar
     const wantsVtt = job.editMode === 'auto'
-    if (job.cutType === 'smart' || videoSource === 'reaproveitado' || wantsVtt) {
+    // YouTube longo NAO usa smartCut de Shorts (que pega 60-120s viral).
+    // Em vez disso, baixa o video INTEIRO e o corteDenso pega 8-12min depois.
+    // v1.0.62: bug onde job platform='youtube' caia em smartCut e baixava
+    // so 2min do video, depois corteDenso ficava sem o que cortar.
+    const isYoutubePlatform = job.platform === 'youtube'
+    if (!isYoutubePlatform && (job.cutType === 'smart' || videoSource === 'reaproveitado' || wantsVtt)) {
       // wantsVtt força smartCut pra ter VTT mesmo se cutType !== 'smart' (autoEditor precisa)
       liveView.updateStatus(liveJobId, '🧠 IA escolhendo melhor trecho')
       try {
@@ -352,9 +357,13 @@ export default async function jobRunner(job, dataDir, log) {
       try {
         const { ranges } = await selecionarTrechosDensos({ videoPath, targetMin: job.ytTargetMin || 10, log })
         const cortado = videoPath.replace('.mp4', '_denso.mp4')
-        await aplicarCorteDenso({ videoPath, ranges, outputPath: cortado, log })
-        try { fs.unlinkSync(videoPath) } catch {}
-        videoPath = cortado
+        // v1.0.62 fix: USA o retorno. Se video ja eh menor que alvo,
+        // aplicarCorteDenso devolve videoPath original SEM criar outputPath.
+        const novoVideoPath = await aplicarCorteDenso({ videoPath, ranges, outputPath: cortado, log })
+        if (novoVideoPath && novoVideoPath !== videoPath) {
+          try { fs.unlinkSync(videoPath) } catch {}
+          videoPath = novoVideoPath
+        }
       } catch (e) { log(`⚠️ Corte denso falhou: ${e.message.slice(0,80)} - seguindo com video inteiro`) }
     }
 
@@ -375,18 +384,35 @@ export default async function jobRunner(job, dataDir, log) {
     }
 
     // 3. Auto-edit 16:9 final (sempre roda — corte bordas + watermark)
-    try {
-      const editado = videoPath.replace('.mp4', '_yt.mp4')
-      await applyAutoEdit16x9({
-        videoPath, outputPath: editado,
-        cutSilence: (ytMode === 'original'), // ja foi feito no corteDenso
-        trimEdgePercent: ytMode === 'dublado' ? 0 : 5, // dublado nao corta bordas (audio ja alinhado)
-        watermarkText: job.watermarkType === 'text' ? job.watermarkText : '',
-        log,
-      })
-      try { fs.unlinkSync(videoPath) } catch {}
-      videoPath = editado
-    } catch (e) { log(`⚠️ Auto-edit 16:9 falhou: ${e.message.slice(0,80)}`) }
+    // v1.0.62: valida que arquivo ainda existe antes (cobre caso onde corte
+    // denso deletou original mas falhou em criar denso). Se nao existe,
+    // pula auto-edit pra nao deletar o que sobrou.
+    if (fs.existsSync(videoPath)) {
+      try {
+        const editado = videoPath.replace('.mp4', '_yt.mp4')
+        await applyAutoEdit16x9({
+          videoPath, outputPath: editado,
+          cutSilence: (ytMode === 'original'),
+          trimEdgePercent: ytMode === 'dublado' ? 0 : 5,
+          watermarkText: job.watermarkType === 'text' ? job.watermarkText : '',
+          log,
+        })
+        // So substitui se realmente gerou o arquivo novo
+        if (fs.existsSync(editado) && fs.statSync(editado).size > 1024) {
+          try { fs.unlinkSync(videoPath) } catch {}
+          videoPath = editado
+        }
+      } catch (e) { log(`⚠️ Auto-edit 16:9 falhou: ${e.message.slice(0,80)}`) }
+    } else {
+      log(`⚠️ Arquivo intermediario sumiu (${path.basename(videoPath)}). Pulando auto-edit.`)
+    }
+
+    // v1.0.62: ultima checagem antes de postar
+    if (!fs.existsSync(videoPath)) {
+      log(`❌ Pipeline YouTube quebrou em algum lugar — arquivo nao existe: ${videoPath}`)
+      try { liveView.markCompleted(liveJobId, { success: false, message: 'Pipeline quebrou' }) } catch {}
+      return { posted: false }
+    }
 
     // 4. Gera titulo/descricao/tags YT via Qwen local
     try {
