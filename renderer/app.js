@@ -528,8 +528,12 @@ function renderJobs(jobs) {
 }
 
 function buildJobCard(job, compact) {
-  const platBadge = job.platform === 'tiktok' ? 'badge-tk' : 'badge-ig'
-  const platLabel = job.platform === 'tiktok' ? '🎵 TikTok' : '📸 Instagram'
+  const platBadge = job.platform === 'youtube' ? 'badge-yt'
+                  : job.platform === 'tiktok'  ? 'badge-tk'
+                                               : 'badge-ig'
+  const platLabel = job.platform === 'youtube' ? '▶️ YouTube'
+                  : job.platform === 'tiktok'  ? '🎵 TikTok'
+                                               : '📸 Instagram'
   const statusCls = getStatusClass(job.status || job.lastStatus)
   const statusTxt = job.status || job.lastStatus || 'parado'
   const lastRun   = job.lastRun ? `Último: ${new Date(job.lastRun).toLocaleString('pt-BR')}` : 'Nunca executado'

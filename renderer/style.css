@@ -281,6 +281,7 @@ body {
 }
 .badge-ig { background: rgba(221,42,123,0.15); color: #f06292; }
 .badge-tk { background: rgba(105,201,208,0.12); color: #69c9d0; }
+.badge-yt { background: rgba(255,0,0,0.12); color: #ff4444; }
 .job-meta {
   display: flex;
   gap: 16px;
