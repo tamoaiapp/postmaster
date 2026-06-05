@@ -211,6 +211,38 @@ export function stopServer() {
   // node-llama-cpp não tem servidor — nada a parar
 }
 
+// ── API generica de complete (pra youtubeMeta, dublagem/translate, etc) ──────
+// Adicionado em v1.0.60: youtubeMeta.mjs e dublagem/translate.mjs importavam
+// `aiManager` mas nada exportava esse objeto -> import retornava undefined ->
+// jobRunner.mjs falhava silenciosamente no import top-level -> erro
+// "jobRunner is not a function". Pra padronizar, exponho objeto com .get()
+// e .complete() que reusa o _model ja carregado.
+async function _complete(prompt, { maxTokens = 250 } = {}) {
+  if (!_model) {
+    try { await loadModel() } catch { return '' }
+  }
+  if (!_model) return ''
+  const { LlamaChatSession } = await import('node-llama-cpp')
+  const ctx = await _model.createContext({ contextSize: 1024 })
+  const session = new LlamaChatSession({ contextSequence: ctx.getSequence() })
+  try {
+    return await session.prompt(prompt, { maxTokens })
+  } catch {
+    return ''
+  } finally {
+    try { ctx.dispose() } catch {}
+  }
+}
+
+export const aiManager = {
+  async get() {
+    if (!_model) await loadModel().catch(() => {})
+    if (!_model) return null
+    return { complete: _complete }
+  },
+  complete: _complete,
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fallback(titulo, nicho) {
