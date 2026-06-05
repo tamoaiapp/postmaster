@@ -23,10 +23,6 @@
       <div class="dot"></div>
       <span>yt-dlp</span>
     </div>
-    <button id="btn-tamoia" title="Pedir ajuda à TamoIA" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;border-radius:14px;padding:6px 14px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;margin-right:8px;font-size:12px;-webkit-app-region:no-drag;box-shadow:0 2px 12px rgba(139,92,246,0.4)">
-      <span style="width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,0.18);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;position:relative">T<span style="position:absolute;top:-1px;right:-1px;width:6px;height:6px;background:#16c784;border-radius:50%;border:1px solid #6366f1"></span></span>
-      Pedir ajuda
-    </button>
     <div class="win-controls">
       <button onclick="window.api.win.minimize()" title="Minimizar">─</button>
       <button onclick="window.api.win.maximize()" title="Maximizar">□</button>
@@ -213,7 +209,11 @@
   </main>
 </div>
 
-<!-- Floating log toggle -->
+<!-- Floating: Ajuda (TamoIA) acima de Logs -->
+<button id="help-toggle" title="Pedir ajuda à TamoIA">
+  <span class="help-avatar">T<span class="help-dot"></span></span>
+  Ajuda
+</button>
 <button id="log-toggle" onclick="toggleLogPanel()">
   📋 Logs <span id="log-badge"></span>
 </button>
@@ -249,9 +249,6 @@
       <div style="display:flex;gap:8px;background:#161b27;border-radius:14px;padding:8px 10px 8px 14px;border:1px solid rgba(255,255,255,0.06)">
         <textarea id="tamoia-input" placeholder="Descreva o que está acontecendo..." rows="1" style="flex:1;background:transparent;border:none;color:#eef2f9;font-size:0.92rem;resize:none;font-family:inherit;outline:none;max-height:100px"></textarea>
         <button id="tamoia-send" onclick="sendTamoia()" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;border-radius:10px;padding:6px 12px;cursor:pointer;font-weight:800;font-size:0.82rem;align-self:flex-end">↑</button>
-      </div>
-      <div style="text-align:center;font-size:0.7rem;color:#4e5c72;margin-top:8px">
-        Pra falar com pessoa, digita <strong style="color:#8394b0">"quero falar com humano"</strong>
       </div>
     </div>
   </div>
@@ -370,7 +367,7 @@
       body: 'Quando uma automação tá rodando, dá pra ver em tempo real o que ela tá fazendo: baixando, editando, postando.<br><br>Tipo um "olhinho mágico" — se algo travar, você vê na hora.',
     },
     {
-      target: '#btn-tamoia',
+      target: '#help-toggle',
       placement: 'bottom',
       title: '4. TamoIA — sua atendente 24/7',
       body: 'Travou algo? Deu erro? Tem dúvida? Clica nesse botão.<br><br>A <strong>TamoIA</strong> é uma IA treinada que <em>lê os logs do seu app em tempo real</em> e te responde direto. Sem fila, sem esperar humano.<br><br>Ela resolve sozinha 90% dos casos.',
@@ -665,7 +662,7 @@
     }
   })
 
-  document.getElementById('btn-tamoia').addEventListener('click', openTamoia)
+  document.getElementById('help-toggle').addEventListener('click', openTamoia)
 })()
 </script>
 
