@@ -78,7 +78,24 @@ jobs:
           New-Item -ItemType Directory -Force -Path bin | Out-Null
           $url = 'https://github.com/denoland/deno/releases/download/v2.1.4/deno-x86_64-pc-windows-msvc.zip'
           $zip = "$env:RUNNER_TEMP\deno.zip"
-          Invoke-WebRequest $url -OutFile $zip
+          # Retry 4x — GitHub releases ocasionalmente retorna HTML "Unicorn!" 503
+          $ok = $false
+          for ($i = 1; $i -le 4 -and -not $ok; $i++) {
+            try {
+              Invoke-WebRequest $url -OutFile $zip -MaximumRedirection 5 -ErrorAction Stop
+              # Valida: ZIP de verdade tem >10MB e magic PK\x03\x04
+              $size = (Get-Item $zip).Length
+              $bytes = [IO.File]::ReadAllBytes($zip)[0..1]
+              if ($size -gt 10MB -and $bytes[0] -eq 0x50 -and $bytes[1] -eq 0x4B) {
+                $ok = $true; break
+              }
+              Write-Host "Tentativa $i: download invalido (${size} bytes, magic $($bytes -join ','))"
+            } catch {
+              Write-Host "Tentativa $i falhou: $($_.Exception.Message)"
+            }
+            Start-Sleep -Seconds (5 * $i)
+          }
+          if (-not $ok) { throw "deno.zip nao baixou em 4 tentativas" }
           Expand-Archive $zip -DestinationPath bin -Force
           if (-not (Test-Path bin\deno.exe)) { throw "deno.exe nao extraido" }
           (Get-Item bin\deno.exe).Length / 1MB
@@ -88,7 +105,24 @@ jobs:
         shell: pwsh
         run: |
           $url = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
-          Invoke-WebRequest $url -OutFile bin\yt-dlp.exe
+          # Retry 4x — GitHub flake comum
+          $ok = $false
+          for ($i = 1; $i -le 4 -and -not $ok; $i++) {
+            try {
+              Invoke-WebRequest $url -OutFile bin\yt-dlp.exe -MaximumRedirection 5 -ErrorAction Stop
+              # Valida: yt-dlp.exe >5MB e PE magic MZ
+              $size = (Get-Item bin\yt-dlp.exe).Length
+              $bytes = [IO.File]::ReadAllBytes('bin\yt-dlp.exe')[0..1]
+              if ($size -gt 5MB -and $bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A) {
+                $ok = $true; break
+              }
+              Write-Host "Tentativa $i: download invalido (${size} bytes, magic $($bytes -join ','))"
+            } catch {
+              Write-Host "Tentativa $i falhou: $($_.Exception.Message)"
+            }
+            Start-Sleep -Seconds (5 * $i)
+          }
+          if (-not $ok) { throw "yt-dlp.exe nao baixou em 4 tentativas" }
           (Get-Item bin\yt-dlp.exe).Length / 1MB
 
       - name: Install Playwright Chromium + headless_shell + ffmpeg
