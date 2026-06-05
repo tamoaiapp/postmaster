@@ -24,9 +24,14 @@ import { buscarVideoTiktok, baixarVideoTiktok, marcarPostadoTk, marcarFalhouTk }
 import { buscarVideoInstagram, baixarVideoInstagram, marcarPostadoIg, marcarFalhouIg } from './sources/instagram.mjs'
 import { postReelInstagram } from './poster/instagram.mjs'
 import { postVideoTikTok }   from './poster/tiktok.mjs'
+import { postVideoYouTube }  from './poster/youtube.mjs'
 import { gerarCaption }      from './caption/ollama.mjs'
 import * as liveView         from './liveView.mjs'
 import { appendOutroToReel } from './outroAppend.mjs'
+import { applyAutoEdit16x9 } from './autoEditor16x9.mjs'
+import { selecionarTrechosDensos, aplicarCorteDenso } from './smartCutLong.mjs'
+import { dublarVideo }       from './dublagem/index.mjs'
+import { gerarMetadadosYoutube } from './youtubeMeta.mjs'
 
 export default async function jobRunner(job, dataDir, log) {
   // Registra a sessao no Live View desde o inicio (mesmo sem browser aberto ainda)
@@ -336,6 +341,65 @@ export default async function jobRunner(job, dataDir, log) {
     }
   }
 
+  // ── YOUTUBE: pipeline especifico (16:9, dublagem opcional, corte denso) ──────
+  let ytMeta = null
+  if (job.platform === 'youtube') {
+    const ytMode = job.ytMode || 'original' // 'original' | 'corteDenso' | 'dublado' | 'corteDensoDublado'
+    log(`🎬 YouTube modo: ${ytMode}`)
+
+    // 1. Corte denso (pega 8-12min de video longo)
+    if (ytMode === 'corteDenso' || ytMode === 'corteDensoDublado') {
+      try {
+        const { ranges } = await selecionarTrechosDensos({ videoPath, targetMin: job.ytTargetMin || 10, log })
+        const cortado = videoPath.replace('.mp4', '_denso.mp4')
+        await aplicarCorteDenso({ videoPath, ranges, outputPath: cortado, log })
+        try { fs.unlinkSync(videoPath) } catch {}
+        videoPath = cortado
+      } catch (e) { log(`⚠️ Corte denso falhou: ${e.message.slice(0,80)} - seguindo com video inteiro`) }
+    }
+
+    // 2. Dublagem PT-BR (Whisper + Qwen + Piper TTS)
+    if (ytMode === 'dublado' || ytMode === 'corteDensoDublado') {
+      try {
+        const dublado = videoPath.replace('.mp4', '_dublado.mp4')
+        await dublarVideo({
+          videoPath, outputPath: dublado,
+          voice: job.ytVoz || 'homem',
+          queimarLegenda: !!job.ytLegenda,
+          langOrigem: job.ytLangOrigem || 'auto',
+          log,
+        })
+        try { fs.unlinkSync(videoPath) } catch {}
+        videoPath = dublado
+      } catch (e) { log(`⚠️ Dublagem falhou: ${e.message.slice(0,100)} - postando com audio original`) }
+    }
+
+    // 3. Auto-edit 16:9 final (sempre roda — corte bordas + watermark)
+    try {
+      const editado = videoPath.replace('.mp4', '_yt.mp4')
+      await applyAutoEdit16x9({
+        videoPath, outputPath: editado,
+        cutSilence: (ytMode === 'original'), // ja foi feito no corteDenso
+        trimEdgePercent: ytMode === 'dublado' ? 0 : 5, // dublado nao corta bordas (audio ja alinhado)
+        watermarkText: job.watermarkType === 'text' ? job.watermarkText : '',
+        log,
+      })
+      try { fs.unlinkSync(videoPath) } catch {}
+      videoPath = editado
+    } catch (e) { log(`⚠️ Auto-edit 16:9 falhou: ${e.message.slice(0,80)}`) }
+
+    // 4. Gera titulo/descricao/tags YT via Qwen local
+    try {
+      ytMeta = await gerarMetadadosYoutube({
+        tituloOriginal: videoMeta.titulo || 'Video',
+        nicho: job.captionNiche || '',
+      })
+      log(`📝 Meta: ${ytMeta.title.slice(0,60)}...`)
+    } catch (e) {
+      ytMeta = { title: videoMeta.titulo || 'Video', description: caption, tags: [] }
+    }
+  }
+
   // ── Postar ───────────────────────────────────────────────────────────────────
   let ok = false
   try {
@@ -345,6 +409,18 @@ export default async function jobRunner(job, dataDir, log) {
     } else if (job.platform === 'tiktok') {
       log('📤 Postando no TikTok...')
       ok = await postVideoTikTok({ account: job.account, videoPath, caption, dataDir, log, jobId: job.id })
+    } else if (job.platform === 'youtube') {
+      log('📤 Postando no YouTube...')
+      ok = await postVideoYouTube({
+        account: job.account, videoPath,
+        title: ytMeta?.title || (videoMeta.titulo || 'Video'),
+        description: ytMeta?.description || caption,
+        tags: ytMeta?.tags || [],
+        visibility: job.ytVisibility || 'private',
+        category: job.ytCategory || 'Entretenimento',
+        madeForKids: !!job.ytMadeForKids,
+        dataDir, log, jobId: job.id,
+      })
     }
   } catch (err) {
     log(`❌ Erro ao postar: ${err.message}`)

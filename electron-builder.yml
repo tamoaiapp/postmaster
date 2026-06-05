@@ -57,6 +57,15 @@ extraResources:
   # v1.0.31 ate v1.0.34, clientes nao conseguiam baixar de YT desde a recuperacao.
   - from: "bin/deno.exe"
     to: "bin/deno.exe"
+  # YouTube poster (v1.0.57+): pipeline de dublagem PT-BR local
+  # — Whisper.cpp transcreve, Qwen traduz (modelo ja em models/), Piper TTS gera narracao.
+  # Os 4 itens abaixo sao opcionais — feature so vira ativa quando todos presentes.
+  - from: "bin/whisper-cli.exe"
+    to: "bin/whisper-cli.exe"
+  - from: "bin/ggml-small.bin"
+    to: "bin/ggml-small.bin"
+  - from: "bin/piper"
+    to: "bin/piper"
   # Modelo de face (fase 2). main.js copia daqui pra userData no boot.
   - from: "models/face-detector.onnx"
     to: "models/face-detector.onnx"

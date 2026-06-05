@@ -125,6 +125,63 @@ jobs:
           if (-not $ok) { throw "yt-dlp.exe nao baixou em 4 tentativas" }
           (Get-Item bin\yt-dlp.exe).Length / 1MB
 
+      - name: Baixa whisper.cpp + modelo small + Piper TTS + vozes BR (dublagem YT)
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        continue-on-error: true  # nao quebra build se download falhar — feature so vira ativa quando tudo presente
+        run: |
+          # 1. whisper.cpp Windows binary (cli)
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          $whisperZip = "$env:RUNNER_TEMP\whisper-cli.zip"
+          $whisperUrl = 'https://github.com/ggml-org/whisper.cpp/releases/latest/download/whisper-bin-x64.zip'
+          try {
+            Invoke-WebRequest $whisperUrl -OutFile $whisperZip -ErrorAction Stop
+            Expand-Archive $whisperZip -DestinationPath "$env:RUNNER_TEMP\whisper" -Force
+            $whisperExe = Get-ChildItem -Recurse "$env:RUNNER_TEMP\whisper" -Filter 'whisper-cli.exe','main.exe' | Select-Object -First 1
+            if ($whisperExe) {
+              Copy-Item $whisperExe.FullName "bin\whisper-cli.exe" -Force
+              # Copia DLLs ao lado (whisper precisa)
+              Get-ChildItem $whisperExe.DirectoryName -Filter "*.dll" | ForEach-Object { Copy-Item $_.FullName "bin\$($_.Name)" -Force }
+              Write-Host "whisper-cli.exe: OK"
+            }
+          } catch { Write-Host "whisper-cli download falhou: $($_.Exception.Message)" }
+
+          # 2. Modelo Whisper small (244MB) — pt_BR funciona muito bem
+          $modelUrl = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin'
+          try {
+            Invoke-WebRequest $modelUrl -OutFile "bin\ggml-small.bin" -ErrorAction Stop
+            Write-Host "Modelo Whisper small: $((Get-Item bin\ggml-small.bin).Length / 1MB) MB"
+          } catch { Write-Host "Modelo Whisper falhou: $($_.Exception.Message)" }
+
+          # 3. Piper TTS Windows binary
+          New-Item -ItemType Directory -Force -Path bin\piper | Out-Null
+          $piperZip = "$env:RUNNER_TEMP\piper.zip"
+          $piperUrl = 'https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip'
+          try {
+            Invoke-WebRequest $piperUrl -OutFile $piperZip -ErrorAction Stop
+            Expand-Archive $piperZip -DestinationPath "$env:RUNNER_TEMP\piper-extracted" -Force
+            Get-ChildItem -Recurse "$env:RUNNER_TEMP\piper-extracted" -File | ForEach-Object {
+              Copy-Item $_.FullName "bin\piper\$($_.Name)" -Force
+            }
+            Write-Host "Piper TTS: OK"
+          } catch { Write-Host "Piper download falhou: $($_.Exception.Message)" }
+
+          # 4. Vozes BR pre-treinadas
+          $voices = @(
+            @{ name='faber-medium'; model='https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR/faber/medium/pt_BR-faber-medium.onnx'; config='https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR/faber/medium/pt_BR-faber-medium.onnx.json' },
+            @{ name='cadu-medium'; model='https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR/cadu/medium/pt_BR-cadu-medium.onnx'; config='https://huggingface.co/rhasspy/piper-voices/resolve/main/pt/pt_BR/cadu/medium/pt_BR-cadu-medium.onnx.json' }
+          )
+          foreach ($v in $voices) {
+            try {
+              Invoke-WebRequest $v.model -OutFile "bin\piper\pt_BR-$($v.name).onnx" -ErrorAction Stop
+              Invoke-WebRequest $v.config -OutFile "bin\piper\pt_BR-$($v.name).onnx.json" -ErrorAction Stop
+              Write-Host "Voz $($v.name): OK"
+            } catch { Write-Host "Voz $($v.name) falhou: $($_.Exception.Message)" }
+          }
+
+          Write-Host "=== bin/ apos download ==="
+          Get-ChildItem bin -Recurse | Select-Object Name,@{N='MB';E={[math]::Round($_.Length/1MB,2)}} | Format-Table -AutoSize
+
       - name: Install Playwright Chromium + headless_shell + ffmpeg
         if: steps.check.outputs.skip != 'true'
         run: npx playwright install chromium chromium-headless-shell ffmpeg

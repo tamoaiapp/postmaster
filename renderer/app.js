@@ -15,6 +15,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupNav()
   setupEvents()
   await checkDeps()
+  // Pre-carrega settings pra wizard checar feature flags
+  try { window.__pmSettings = await window.api.settings.get() } catch {}
   await refreshAll()
   setInterval(refreshAll, 5000)
 })
@@ -764,10 +766,12 @@ async function editJob(id) {
     cutType: 'smart', editMode: 'auto',
     watermarkType: 'none', watermarkText: '', watermarkImagePath: '', watermarkPosition: 'br',
     outroType: 'none', outroPath: '', outroDurationSec: 3,
+    ytMode: 'original', ytTargetMin: 10, ytVoz: 'homem', ytLegenda: false,
+    ytLangOrigem: 'auto', ytVisibility: 'private', ytCategory: 'Entretenimento', ytMadeForKids: false,
     captionType: 'ai', captionTemplate: '', captionNiche: '',
     scheduleType: 'interval', intervalMin: 60, timeWindows: '08:00-22:00',
     autoStart: true,
-    ...job, // sobrescreve com os valores reais do job
+    ...job,
   }
   document.getElementById('wizard-overlay').classList.add('open')
   document.getElementById('wizard-title').textContent = 'Editar Automação'
@@ -797,6 +801,15 @@ function openWizard() {
     watermarkType: 'none', watermarkText: '', watermarkImagePath: '', watermarkPosition: 'br',
     // Anexo no final (divulgar produto/servico): cola foto/video no fim do reel
     outroType: 'none', outroPath: '', outroDurationSec: 3,
+    // YouTube (atras de feature flag)
+    ytMode: 'original', // 'original' | 'corteDenso' | 'dublado' | 'corteDensoDublado'
+    ytTargetMin: 10,
+    ytVoz: 'homem', // 'homem' | 'mulher'
+    ytLegenda: false, // queimar legenda no video
+    ytLangOrigem: 'auto',
+    ytVisibility: 'private', // 'public' | 'unlisted' | 'private'
+    ytCategory: 'Entretenimento',
+    ytMadeForKids: false,
     // Legenda
     captionType: 'ai', captionTemplate: '', captionNiche: '',
     // Agendamento
@@ -875,6 +888,7 @@ function getWizardBody(step) {
           <div class="platform-select">
             <div class="platform-btn ${wizardData.platform==='instagram'?'selected':''}" data-plat="instagram" onclick="wizSelectPlatform(this)">📸 IG</div>
             <div class="platform-btn ${wizardData.platform==='tiktok'?'selected':''}" data-plat="tiktok" onclick="wizSelectPlatform(this)">🎵 TK</div>
+            ${window.__pmSettings?.youtubeBeta ? `<div class="platform-btn ${wizardData.platform==='youtube'?'selected':''}" data-plat="youtube" onclick="wizSelectPlatform(this)" title="YouTube (beta)">▶ YT</div>` : ''}
           </div>
         </div>
       </div>
@@ -1057,6 +1071,88 @@ function getWizardBody(step) {
           </div>
         ` : ''}
       </div>
+
+      ${wizardData.platform === 'youtube' ? `
+      <div class="filter-section" style="border-color:rgba(239,68,68,0.25);background:rgba(239,68,68,0.04)">
+        <div class="filter-section-title">▶️ Configuração YouTube</div>
+
+        <div class="form-group">
+          <label>Modo de processamento</label>
+          <select onchange="wizardData.ytMode=this.value;renderWizardStep()">
+            <option value="original" ${wizardData.ytMode==='original'?'selected':''}>📼 Original — só re-encoda 16:9 + watermark (rápido)</option>
+            <option value="corteDenso" ${wizardData.ytMode==='corteDenso'?'selected':''}>✂️ Corte inteligente — pega 8-12min de vídeo longo</option>
+            <option value="dublado" ${wizardData.ytMode==='dublado'?'selected':''}>🎤 Dublado PT-BR — Whisper + Qwen + Piper TTS local</option>
+            <option value="corteDensoDublado" ${wizardData.ytMode==='corteDensoDublado'?'selected':''}>✂️🎤 Corte + Dublado (mais lento)</option>
+          </select>
+          <span class="text-sm text-muted">Tempo: original ~3min · corte ~8min · dublado ~25min · combo ~35min (vídeo de 15min)</span>
+        </div>
+
+        ${wizardData.ytMode === 'corteDenso' || wizardData.ytMode === 'corteDensoDublado' ? `
+          <div class="form-group">
+            <label>Duração alvo do corte (min)</label>
+            <input type="number" min="3" max="20" value="${wizardData.ytTargetMin || 10}" onchange="wizardData.ytTargetMin=parseInt(this.value)||10">
+          </div>
+        ` : ''}
+
+        ${wizardData.ytMode === 'dublado' || wizardData.ytMode === 'corteDensoDublado' ? `
+          <div class="form-group">
+            <label>Voz da narração</label>
+            <div style="display:flex;gap:8px">
+              <label style="flex:1;cursor:pointer;padding:10px;border:1px solid var(--border);border-radius:8px;${wizardData.ytVoz==='homem'?'background:rgba(99,102,241,0.15);border-color:rgba(99,102,241,0.5)':''}">
+                <input type="radio" name="ytVoz" value="homem" ${wizardData.ytVoz==='homem'?'checked':''} onchange="wizardData.ytVoz='homem'" style="margin-right:6px">
+                👨 Homem (Faber BR)
+              </label>
+              <label style="flex:1;cursor:pointer;padding:10px;border:1px solid var(--border);border-radius:8px;${wizardData.ytVoz==='mulher'?'background:rgba(99,102,241,0.15);border-color:rgba(99,102,241,0.5)':''}">
+                <input type="radio" name="ytVoz" value="mulher" ${wizardData.ytVoz==='mulher'?'checked':''} onchange="wizardData.ytVoz='mulher'" style="margin-right:6px">
+                👩 Mulher (Cadu BR)
+              </label>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Idioma do vídeo original</label>
+            <select onchange="wizardData.ytLangOrigem=this.value">
+              <option value="auto" ${wizardData.ytLangOrigem==='auto'?'selected':''}>🔍 Detectar automaticamente</option>
+              <option value="en" ${wizardData.ytLangOrigem==='en'?'selected':''}>🇺🇸 Inglês</option>
+              <option value="es" ${wizardData.ytLangOrigem==='es'?'selected':''}>🇪🇸 Espanhol</option>
+              <option value="ja" ${wizardData.ytLangOrigem==='ja'?'selected':''}>🇯🇵 Japonês</option>
+              <option value="ko" ${wizardData.ytLangOrigem==='ko'?'selected':''}>🇰🇷 Coreano</option>
+              <option value="pt" ${wizardData.ytLangOrigem==='pt'?'selected':''}>🇧🇷 Português (re-narração)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-check">
+              <input type="checkbox" ${wizardData.ytLegenda?'checked':''} onchange="wizardData.ytLegenda=this.checked">
+              Queimar legenda PT-BR no vídeo
+            </label>
+          </div>
+        ` : ''}
+
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label>Visibilidade</label>
+            <select onchange="wizardData.ytVisibility=this.value">
+              <option value="private" ${wizardData.ytVisibility==='private'?'selected':''}>🔒 Privado</option>
+              <option value="unlisted" ${wizardData.ytVisibility==='unlisted'?'selected':''}>🔗 Não listado</option>
+              <option value="public" ${wizardData.ytVisibility==='public'?'selected':''}>🌎 Público</option>
+            </select>
+          </div>
+          <div class="form-group" style="flex:1">
+            <label>Categoria</label>
+            <select onchange="wizardData.ytCategory=this.value">
+              ${['Filmes e Animação','Carros e Veículos','Música','Animais','Esportes','Viagens e Eventos','Jogos','Pessoas e Blogs','Comédia','Entretenimento','Notícias e Política','Estilo e Beleza','Educação','Ciência e Tecnologia','Sem Fins Lucrativos'].map(c=>`<option value="${c}" ${wizardData.ytCategory===c?'selected':''}>${c}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Audiência (lei COPPA)</label>
+          <select onchange="wizardData.ytMadeForKids=this.value==='yes'">
+            <option value="no" ${!wizardData.ytMadeForKids?'selected':''}>Não, não é feito pra crianças</option>
+            <option value="yes" ${wizardData.ytMadeForKids?'selected':''}>Sim, é feito pra crianças</option>
+          </select>
+        </div>
+      </div>
+      ` : ''}
     `
     case 1: return `
       <div id="wiz-account-loading" style="color:var(--muted);text-align:center;padding:20px">
