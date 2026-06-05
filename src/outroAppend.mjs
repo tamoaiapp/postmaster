@@ -52,9 +52,14 @@ export async function appendOutroToReel(reelPath, { type, outroPath, durationSec
       await execAsync(cmd, { timeout: 120000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 })
     }
 
-    // Concat com filter_complex (robusto contra timebase diferente)
+    // Concat com filter_complex — NORMALIZA ambos (scale + setsar + fps + sample
+    // rate) antes do concat porque reels gerados pelo autoEditor saem com SAR
+    // anormal (1216:1215), o que faz concat=n falhar com "Error reinitializing
+    // filters".
+    const normVideo = 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=30'
+    const normAudio = 'aresample=44100,aformat=channel_layouts=stereo:sample_fmts=fltp'
     const concatCmd = `"${ffmpegPath}" -y -i "${reelPath}" -i "${tmpOutro}" ` +
-      `-filter_complex "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]" ` +
+      `-filter_complex "[0:v]${normVideo}[v0];[1:v]${normVideo}[v1];[0:a]${normAudio}[a0];[1:a]${normAudio}[a1];[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]" ` +
       `-map "[v]" -map "[a]" -c:v libx264 -preset ultrafast -crf 22 -pix_fmt yuv420p ` +
       `-c:a aac -b:a 128k -movflags +faststart "${finalOut}"`
     log(`🔗 Concatenando reel + outro...`)
