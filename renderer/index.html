@@ -390,8 +390,8 @@
     el.id = 'pm-tour-overlay'
     el.style.cssText = 'position:fixed;inset:0;z-index:9999;pointer-events:none;font-family:Segoe UI,sans-serif'
     el.innerHTML = `
-      <div id="pm-tour-dim" style="position:absolute;inset:0;background:rgba(7,8,11,0.72);backdrop-filter:blur(3px);transition:opacity .25s;pointer-events:auto"></div>
-      <div id="pm-tour-spot" style="position:absolute;border-radius:14px;box-shadow:0 0 0 9999px rgba(7,8,11,0.78),0 0 0 4px rgba(99,102,241,0.6),0 0 40px rgba(99,102,241,0.4);transition:all .35s cubic-bezier(.4,0,.2,1);pointer-events:none;display:none"></div>
+      <div id="pm-tour-dim" style="position:absolute;inset:0;background:rgba(7,8,11,0.65);backdrop-filter:blur(2px);transition:opacity .25s;pointer-events:auto"></div>
+      <div id="pm-tour-spot" style="position:absolute;border-radius:14px;background:transparent;box-shadow:0 0 0 9999px rgba(7,8,11,0.65),inset 0 0 0 2px rgba(99,102,241,0.9),0 0 32px rgba(99,102,241,0.55);transition:all .35s cubic-bezier(.4,0,.2,1);pointer-events:none;display:none"></div>
       <div id="pm-tour-card" style="position:absolute;background:#0c1018;border:1px solid rgba(99,102,241,0.35);border-radius:18px;padding:22px 24px;color:#eef2f9;box-shadow:0 24px 60px rgba(0,0,0,0.6);max-width:380px;pointer-events:auto;transition:all .3s ease;opacity:0;transform:translateY(8px)">
         <div id="pm-tour-progress" style="display:flex;gap:5px;margin-bottom:14px"></div>
         <div id="pm-tour-title" style="font-weight:800;font-size:1.05rem;margin-bottom:8px;line-height:1.3"></div>
@@ -466,11 +466,17 @@
     card.style.transform = 'translate(0,0)'
   }
 
-  function positionSpotlight(target, spotEl) {
+  function positionSpotlight(target, spotEl, dimEl) {
     if (!target) {
+      // Sem alvo (modal central): mostra dim normal, esconde spot
       spotEl.style.display = 'none'
+      if (dimEl) dimEl.style.display = 'block'
       return
     }
+    // Com alvo: spot faz o escuro via box-shadow gigante. ESCONDE o dim pra
+    // nao escurecer DUPLO sobre o proprio alvo (era o bug — dim + spot box-shadow
+    // somavam e cobriam ate o elemento destacado).
+    if (dimEl) dimEl.style.display = 'none'
     const r = target.getBoundingClientRect()
     spotEl.style.display = 'block'
     spotEl.style.top = (r.top - 6) + 'px'
@@ -503,9 +509,11 @@
     overlay.querySelector('#pm-tour-next').textContent = step.cta || (i === STEPS.length - 1 ? 'Concluir ✓' : 'Próximo →')
     renderProgress(overlay.querySelector('#pm-tour-progress'), STEPS.length, i)
 
+    const dim = overlay.querySelector('#pm-tour-dim')
+
     // Sequência: spotlight primeiro, card depois (timing)
     requestAnimationFrame(() => {
-      positionSpotlight(target, spot)
+      positionSpotlight(target, spot, dim)
       requestAnimationFrame(() => {
         positionCard(target, step.placement, card)
         card.style.opacity = '1'
@@ -555,7 +563,7 @@
     if (!isActive) return
     const step = STEPS[currentStep]
     const target = step?.target ? document.querySelector(step.target) : null
-    positionSpotlight(target, document.getElementById('pm-tour-spot'))
+    positionSpotlight(target, document.getElementById('pm-tour-spot'), document.getElementById('pm-tour-dim'))
     positionCard(target, step?.placement, document.getElementById('pm-tour-card'))
   })
 
