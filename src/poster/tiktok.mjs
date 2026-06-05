@@ -166,31 +166,104 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
       await delay(1000)
     }
 
-    // Post button — usa force:true pra ignorar overlay caso ainda exista
+    // Post button — robusto contra: seletor errado pegando "Post a comment",
+    // upload ainda em andamento (botao disabled), overlay re-renderizado, footer
+    // fora da viewport. v1.0.46+: usa data-e2e estavel, texto EXATO, scroll, e
+    // fallback de keyboard.
     let posted = false
-    for (let tentativa = 1; tentativa <= 3 && !posted; tentativa++) {
+    const MAX_ATTEMPTS = 5
+    for (let tentativa = 1; tentativa <= MAX_ATTEMPTS && !posted; tentativa++) {
       try {
-        // Re-dispensa popups antes de cada tentativa
-        if (tentativa > 1) {
-          await page.evaluate(() => {
-            document.querySelectorAll('[data-floating-ui-portal]').forEach(el => {
-              try { el.remove() } catch {}
-            })
-          }).catch(() => {})
-          await delay(1000)
+        // 1. Dispensa popups + scroll pro footer do modal de publicacao
+        await page.evaluate(() => {
+          document.querySelectorAll('[data-floating-ui-portal], #react-joyride-portal, #react-joyride__portal').forEach(el => {
+            try { el.remove() } catch {}
+          })
+          // Scroll pro fim do form de publicacao (botao Post fica no rodape)
+          const main = document.querySelector('main, [class*="ContentForm"], [class*="UploadCard"]')
+          if (main) main.scrollTop = main.scrollHeight
+          window.scrollTo(0, document.body.scrollHeight)
+        }).catch(() => {})
+        await delay(1200)
+
+        // 2. Aguarda upload terminar (botao fica disabled durante upload)
+        const uploadInProgress = await page.evaluate(() => {
+          // Procura indicadores: "uploading", "carregando", "%", spinner ativo
+          const text = (document.body.innerText || '').toLowerCase()
+          if (/uploading|carregando|loading\s*\d+%/.test(text)) return true
+          // Botao Post com aria-disabled
+          const btns = Array.from(document.querySelectorAll('button, [role="button"]'))
+          const postBtn = btns.find(b => {
+            const t = (b.innerText || '').trim().toLowerCase()
+            return t === 'post' || t === 'publicar' || t === 'postar'
+          })
+          if (postBtn && (postBtn.disabled || postBtn.getAttribute('aria-disabled') === 'true')) return true
+          return false
+        })
+        if (uploadInProgress) {
+          log(`   tentativa ${tentativa}: upload ainda em andamento, aguardando 5s...`)
+          await delay(5000)
+          continue
         }
-        // Tenta clicar via locator com force
-        const btn = page.locator('button:has-text("Post"), button:has-text("Publicar"), div[data-e2e="post_video_button"]').first()
-        if (await btn.count() > 0) {
-          await btn.click({ force: true, timeout: 10000 })
+
+        // 3. Acha o botao Post REAL — texto EXATO + dentro de container de publicacao
+        // (evita "Post a comment", "Posts", "Postagens" do menu lateral)
+        const btnHandle = await page.evaluateHandle(() => {
+          // Estrategia 1: data-e2e (mais estavel quando existe)
+          const e2e = document.querySelector('[data-e2e="post_video_button"], [data-e2e="publish-button"], [data-e2e="post-button"]')
+          if (e2e && !e2e.disabled && e2e.getAttribute('aria-disabled') !== 'true') return e2e
+          // Estrategia 2: button com texto EXATO Post/Publicar (case-insensitive, trim)
+          const all = Array.from(document.querySelectorAll('button, [role="button"], div[class*="Button"]'))
+          // Filtra: precisa texto exato + estar visivel + nao disabled
+          const candidates = all.filter(el => {
+            const t = (el.innerText || '').trim().toLowerCase()
+            if (t !== 'post' && t !== 'publicar' && t !== 'postar') return false
+            const r = el.getBoundingClientRect()
+            if (r.width < 40 || r.height < 20) return false // muito pequeno = nao eh botao real
+            if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false
+            return true
+          })
+          // Prioriza o que ta no footer/rodape do form (mais a baixo na pagina)
+          candidates.sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top)
+          return candidates[0] || null
+        })
+        const el = btnHandle.asElement()
+        if (!el) {
+          await btnHandle.dispose?.()
+          throw new Error('Botão Post não encontrado (sem candidato com texto exato)')
+        }
+
+        // 4. Scroll ate o botao + click via JS (evita overlay)
+        await el.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {})
+        await delay(500)
+        // Tenta click nativo do Playwright primeiro (force=true)
+        try {
+          await el.click({ force: true, timeout: 8000 })
           posted = true
           log(`📤 Publicando... (tentativa ${tentativa})`)
-        } else throw new Error('Botão Post não encontrado')
+        } catch (clickErr) {
+          // Fallback: dispatch JS click event direto (ignora qualquer overlay)
+          await page.evaluate((node) => node.click(), el).catch(() => {})
+          await delay(1500)
+          // Confirma se de fato saiu da pagina de upload
+          const stillOnUpload = await page.evaluate(() => {
+            return /\/upload|\/creator-center\/upload/.test(location.pathname) &&
+                   !!document.querySelector('[data-e2e="post_video_button"], input[type="file"]')
+          })
+          if (!stillOnUpload) {
+            posted = true
+            log(`📤 Publicando... (tentativa ${tentativa}, via JS click)`)
+          } else {
+            throw new Error(`click falhou: ${clickErr.message.split('\n')[0].slice(0, 60)}`)
+          }
+        }
+        await el.dispose?.()
       } catch (e) {
-        log(`   tentativa ${tentativa} falhou: ${e.message.split('\n')[0].slice(0, 80)}`)
+        log(`   tentativa ${tentativa}/${MAX_ATTEMPTS} falhou: ${e.message.split('\n')[0].slice(0, 80)}`)
+        await delay(1500)
       }
     }
-    if (!posted) throw new Error('Botão Post não conseguiu ser clicado mesmo com force após 3 tentativas')
+    if (!posted) throw new Error('tt_post_button_failed: TikTok mudou o layout do botao Post ou upload travou. App vai detectar e arrumar em update.')
     liveView.updateStatus(liveJobId, 'Publicando')
 
     // Aguarda confirmação — TikTok redireciona pra /tiktokstudio/content e mostra "Vídeo publicado"

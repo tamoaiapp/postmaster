@@ -3,15 +3,30 @@
     "_doc":  "Lista de versoes com os kinds de erro que cada uma corrige. O app baixa esse JSON, verifica se o cliente teve algum desses erros recentemente, e mostra toast quando o auto-update aplicar o fix. Fonte: src/supportAgent.mjs classifyError().",
     "versions":  [
                      {
+                         "version":  "1.0.46",
+                         "fixed":  [
+                                       {
+                                           "kind":  "tt_post_button_failed",
+                                           "message":  "Postagem no TikTok travava em 'Botão Post não encontrado'. O seletor antigo pegava qualquer botão com texto 'Post' (ex: 'Post a comment') ou clicava enquanto o upload ainda processava. Agora detecta texto exato + espera upload terminar + scroll até o botão + fallback de JS click. 5 tentativas (era 3)."
+                                       }
+                                   ]
+                     },
+                     {
+                         "version":  "1.0.45",
+                         "fixed":  [
+
+                                   ]
+                     },
+                     {
                          "version":  "1.0.44",
                          "fixed":  [
                                        {
                                            "kind":  "feat_tour_onboarding",
-                                           "message":  "Tour guiado pra primeiro uso � passa por Contas, Automacoes, Ao vivo e TamoIA. Tem botao \u0027Ver tour\u0027 no menu lateral pra rever."
+                                           "message":  "Tour guiado pra primeiro uso � passa por Contas, Automacoes, Ao vivo e TamoIA. Tem botao \u0027Ver tour\u0027 no menu lateral pra rever."
                                        },
                                        {
                                            "kind":  "filter_duration_removed",
-                                           "message":  "Removido filtro de duracao de video (60-300s) que estava ativo sem aparecer no UI. Agora o app pega TODOS os videos do canal � se quiser filtrar, use \u0027Bloquear palavras\u0027."
+                                           "message":  "Removido filtro de duracao de video (60-300s) que estava ativo sem aparecer no UI. Agora o app pega TODOS os videos do canal � se quiser filtrar, use \u0027Bloquear palavras\u0027."
                                        }
                                    ]
                      },

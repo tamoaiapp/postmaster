@@ -237,6 +237,16 @@ export function classifyError(errMsg) {
       fix: null,
     }
   }
+  if (m.includes('tt_post_button_failed') ||
+      m.includes('botão post não encontrado') || m.includes('botao post nao encontrado') ||
+      m.includes('botão post não conseguiu') || m.includes('botao post nao conseguiu')) {
+    return {
+      kind: 'tt_post_button_failed',
+      category: 'bug_app',
+      summary: 'Botão Post do TikTok não encontrado/clicável (layout mudou ou seletor pegou botão errado)',
+      fix: null,
+    }
+  }
   return null
 }
 
