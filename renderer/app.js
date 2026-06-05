@@ -7,7 +7,7 @@ let logPanelOpen = false
 
 // Wizard state
 let wizardStep = 0
-const wizardSteps = ['Fonte', 'Conta', 'Legenda', 'Agendamento', 'Revisar']
+const wizardSteps = ['Plataforma', 'Conteúdo', 'Conta', 'Apresentação', 'Agendamento', 'Revisar']
 let wizardData = {}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -878,19 +878,38 @@ function renderWizardStep() {
 function getWizardBody(step) {
   switch (step) {
     case 0: return `
+      <div style="text-align:center;margin-bottom:1.5rem">
+        <h2 style="font-size:1.2rem;font-weight:800;margin-bottom:0.4rem">Onde você quer postar?</h2>
+        <p style="color:var(--text-dim);font-size:0.88rem">Escolha a plataforma — as próximas configurações vão se adaptar a ela.</p>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(${window.__pmSettings?.youtubeBeta ? '3' : '2'},1fr);gap:14px">
+        ${[
+          {key:'instagram', emoji:'📸', label:'Instagram', sub:'Reels 9:16 — até 90s'},
+          {key:'tiktok',    emoji:'🎵', label:'TikTok',    sub:'Vídeo 9:16 — até 10min'},
+          ...(window.__pmSettings?.youtubeBeta ? [{key:'youtube', emoji:'▶️', label:'YouTube', sub:'Vídeo 16:9 — longo + dublagem (beta)'}] : []),
+        ].map(p => `
+          <label style="cursor:pointer;padding:24px 18px;border:2px solid ${wizardData.platform===p.key?'rgba(99,102,241,0.6)':'var(--border)'};border-radius:14px;text-align:center;background:${wizardData.platform===p.key?'rgba(99,102,241,0.10)':'transparent'};transition:.15s">
+            <input type="radio" name="wizPlat" value="${p.key}" ${wizardData.platform===p.key?'checked':''} onchange="wizardData.platform='${p.key}';renderWizardStep()" style="display:none">
+            <div style="font-size:2.2rem;margin-bottom:0.5rem">${p.emoji}</div>
+            <div style="font-weight:800;font-size:1.05rem;color:var(--text)">${p.label}</div>
+            <div style="font-size:0.78rem;color:var(--text-dim);margin-top:0.3rem">${p.sub}</div>
+          </label>
+        `).join('')}
+      </div>
+      <div style="margin-top:1.5rem;padding:14px 16px;background:rgba(99,102,241,0.06);border-radius:10px;border:1px solid rgba(99,102,241,0.18);font-size:0.83rem;color:var(--text-dim)">
+        💡 <strong style="color:var(--text)">Dica:</strong> mesmo postando no TikTok, você pode pegar conteúdo do YouTube como <em>fonte</em>. Aqui é só onde vai sair o vídeo final.
+      </div>
+    `
+    case 1: return `
       <div class="form-row">
-        <div class="form-group" style="flex:2">
-          <label>Nome da automação</label>
-          <input type="text" id="wiz-name" value="${esc(wizardData.name)}" placeholder="ex: Reels de Negócios">
-        </div>
         <div class="form-group" style="flex:1">
-          <label>Postar para</label>
-          <div class="platform-select">
-            <div class="platform-btn ${wizardData.platform==='instagram'?'selected':''}" data-plat="instagram" onclick="wizSelectPlatform(this)">📸 IG</div>
-            <div class="platform-btn ${wizardData.platform==='tiktok'?'selected':''}" data-plat="tiktok" onclick="wizSelectPlatform(this)">🎵 TK</div>
-            ${window.__pmSettings?.youtubeBeta ? `<div class="platform-btn ${wizardData.platform==='youtube'?'selected':''}" data-plat="youtube" onclick="wizSelectPlatform(this)" title="YouTube (beta)">▶ YT</div>` : ''}
-          </div>
+          <label>Nome da automação</label>
+          <input type="text" id="wiz-name" value="${esc(wizardData.name)}" placeholder="ex: Notícias diárias">
         </div>
+      </div>
+      <div style="margin-bottom:14px;padding:8px 12px;background:rgba(99,102,241,0.06);border-radius:8px;font-size:0.8rem;color:var(--text-dim)">
+        ✓ Postando em: <strong style="color:var(--text)">${wizardData.platform === 'youtube' ? '▶️ YouTube' : wizardData.platform === 'tiktok' ? '🎵 TikTok' : '📸 Instagram'}</strong>
+        <span style="color:var(--muted);margin-left:8px">(volta no passo anterior pra trocar)</span>
       </div>
 
       <div class="form-group">
@@ -1154,7 +1173,7 @@ function getWizardBody(step) {
       </div>
       ` : ''}
     `
-    case 1: return `
+    case 2: return `
       <div id="wiz-account-loading" style="color:var(--muted);text-align:center;padding:20px">
         Carregando contas...
       </div>
@@ -1168,7 +1187,7 @@ function getWizardBody(step) {
         </p>
       </div>
     `
-    case 2: return `
+    case 3: return `
       <div class="caption-grid">
         <div class="caption-card ${wizardData.captionType==='ai'?'selected':''}" onclick="wizCaptionType('ai',this)">
           <div class="ctitle">IA embarcada <span style="color:#a78bfa;font-size:10px;font-weight:600">SEO</span></div>
@@ -1199,7 +1218,7 @@ function getWizardBody(step) {
           <span class="text-sm text-muted">Use {titulo} para o título do vídeo.</span>
         </div>` : ''}
     `
-    case 3: return `
+    case 4: return `
       <div class="schedule-tabs">
         <button class="schedule-tab ${wizardData.scheduleType==='interval'?'active':''}" onclick="wizScheduleType('interval',this)">⏱ Intervalo fixo</button>
         <button class="schedule-tab ${wizardData.scheduleType==='window'?'active':''}" onclick="wizScheduleType('window',this)">🕐 Janela de horário</button>
@@ -1224,7 +1243,7 @@ function getWizardBody(step) {
         Iniciar automaticamente ao abrir o PostMaster
       </label>
     `
-    case 4: return `
+    case 5: return `
       <div class="card" style="margin-bottom:0">
         <div class="form-group">
           <label>Nome</label>
@@ -1361,6 +1380,11 @@ async function loadWizardAccounts() {
 function collectWizardStep(step) {
   switch (step) {
     case 0:
+      if (!wizardData.platform || !['instagram','tiktok','youtube'].includes(wizardData.platform)) {
+        toast('Escolha uma plataforma', 'err'); return false
+      }
+      return true
+    case 1:
       wizardData.name = document.getElementById('wiz-name')?.value.trim() || ''
       if (!wizardData.name) { toast('Digite o nome da automação', 'err'); return false }
       wizardData.sourceUrls    = document.getElementById('wiz-urls')?.value.trim() || ''
@@ -1387,15 +1411,15 @@ function collectWizardStep(step) {
         toast('Escolha um arquivo pra anexar no final, ou troca pra "Nenhum"', 'err'); return false
       }
       return true
-    case 1:
+    case 2:
       wizardData.account = document.getElementById('wiz-account')?.value || ''
       if (!wizardData.account) { toast('Selecione uma conta', 'err'); return false }
       return true
-    case 2:
+    case 3:
       wizardData.captionNiche    = document.getElementById('wiz-niche')?.value.trim() || ''
       wizardData.captionTemplate = document.getElementById('wiz-template')?.value.trim() || ''
       return true
-    case 3:
+    case 4:
       wizardData.intervalMin  = parseInt(document.getElementById('wiz-interval')?.value || document.getElementById('wiz-interval-w')?.value || '60')
       wizardData.timeWindows  = document.getElementById('wiz-window')?.value || '08:00-22:00'
       wizardData.autoStart    = document.getElementById('wiz-autostart')?.checked ?? true
@@ -1409,8 +1433,8 @@ function collectWizardStep(step) {
 async function wizardNext() {
   if (!collectWizardStep(wizardStep)) return
 
-  // Saindo do passo Fonte com YouTube selecionado: pergunta se quer conectar conta YT
-  if (wizardStep === 0 && wizardData.source === 'youtube') {
+  // Saindo do passo Conteudo (step 1) com YouTube como FONTE: pergunta se quer conectar conta YT
+  if (wizardStep === 1 && wizardData.source === 'youtube') {
     const accounts = await window.api.accounts.list()
     const hasYt = accounts.some(a => a.platform === 'youtube')
     if (!hasYt) {
@@ -1465,7 +1489,7 @@ async function wizardNext() {
   }
   wizardStep++
   renderWizardStep()
-  if (wizardStep === 1) loadWizardAccounts()
+  if (wizardStep === 2) loadWizardAccounts()
 }
 
 // Modal customizado: pergunta se quer conectar conta Google p/ baixar do YouTube
@@ -1528,7 +1552,7 @@ function wizardBack() {
   if (wizardStep === 0) return
   wizardStep--
   renderWizardStep()
-  if (wizardStep === 1) loadWizardAccounts()
+  if (wizardStep === 2) loadWizardAccounts()
 }
 
 // ── Logs ──────────────────────────────────────────────────────────────────────
