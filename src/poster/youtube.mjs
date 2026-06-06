@@ -63,10 +63,43 @@ export async function postVideoYouTube({
   try {
     log('🌐 Abrindo YouTube Studio...')
     liveView.updateStatus(liveJobId, 'Abrindo YouTube Studio')
-    // Vai DIRETO no upload (mais confiavel que clicar no botao)
-    await page.goto('https://studio.youtube.com/channel/UC/videos/upload', { waitUntil: 'domcontentloaded', timeout: 60000 })
+    await page.goto('https://studio.youtube.com/', { waitUntil: 'domcontentloaded', timeout: 60000 })
     await delay(3000)
     await snap('01-after-goto')
+
+    // Fecha qualquer modal/dialog de boas-vindas aberto
+    await page.evaluate(() => {
+      const closers = document.querySelectorAll('button, [role="button"]')
+      for (const b of closers) {
+        const t = (b.textContent || '').trim().toLowerCase()
+        if (['fechar', 'close', 'got it', 'entendi', 'ok', 'descartar', 'dismiss'].includes(t)) {
+          try { b.click() } catch {}
+        }
+      }
+    }).catch(() => {})
+    await delay(1500)
+
+    // Clica no botao "Criar" (icone camera+ no topo direito)
+    log('🎬 Clicando em "Criar"...')
+    const createBtn = page.locator('ytcp-button#upload-icon, #create-icon, [aria-label*="Criar"], [aria-label*="Create"], button:has-text("Criar"):visible').first()
+    if (await createBtn.count() === 0) {
+      await snap('02-no-create-btn')
+      throw new Error('Botao "Criar" nao encontrado no YT Studio')
+    }
+    await createBtn.click({ force: true, timeout: 10000 })
+    await delay(2000)
+    await snap('02-after-create-click')
+
+    // Clica em "Enviar videos" no submenu
+    log('📤 Clicando em "Enviar vídeos"...')
+    const enviarBtn = page.getByText(/Enviar v.?deos?|Upload videos?/i).first()
+    if (await enviarBtn.count() === 0) {
+      await snap('02b-no-enviar-btn')
+      throw new Error('Item "Enviar vídeos" do menu nao encontrado')
+    }
+    await enviarBtn.click({ force: true, timeout: 10000 })
+    await delay(2000)
+    await snap('03-after-enviar-click')
 
     // SetInputFiles no <input type=file>
     log('📎 Aguardando input file...')
@@ -75,7 +108,7 @@ export async function postVideoYouTube({
     log(`📎 Input file encontrado, enviando arquivo (${Math.round(fs.statSync(videoPath).size/1024/1024)}MB)...`)
     await fileInput.setInputFiles(videoPath)
     await delay(3000)
-    await snap('02-after-setInputFiles')
+    await snap('04-after-setInputFiles')
 
     // Aguarda dialogo de detalhes abrir (input de titulo aparece)
     log('⏳ Aguardando dialogo de detalhes abrir (ate 3min)...')
@@ -109,19 +142,28 @@ export async function postVideoYouTube({
     }
 
     // ── Audience (made for kids) ───────────────────────────────
+    // v1.0.65: YouTube agora usa "Sim, é conteúdo para crianças" / "Não é conteúdo para crianças"
+    // O seletor tp-yt-paper-radio-button[name=MADE_FOR_KIDS] parou de funcionar.
     log('👶 Marcando audiencia (kids)...')
-    const kidsRadioName = madeForKids
-      ? /Sim.*feito.*crianças|made for kids/i
-      : /Não.*não.*feito.*crianças|not made for kids/i
-    const kidsRadio = page.locator(`tp-yt-paper-radio-button[name*="${madeForKids ? 'MADE_FOR_KIDS' : 'NOT_MADE_FOR_KIDS'}"]`).first()
-    if (await kidsRadio.count() > 0) {
-      await kidsRadio.click({ force: true }).catch(() => {})
-    } else {
-      // Fallback por texto
-      const byText = page.locator('text=' + (madeForKids ? '/Sim, é feito/i' : '/Não, não é feito/i')).first()
-      if (await byText.count() > 0) await byText.click({ force: true }).catch(() => {})
-    }
-    await delay(1000)
+    const kidsText = madeForKids ? 'Sim, é conteúdo para crianças' : 'Não é conteúdo para crianças'
+    const clickedKids = await page.evaluate((label) => {
+      // Procura label ou span com o texto e clica no radio mais proximo
+      const all = [...document.querySelectorAll('tp-yt-paper-radio-button, label, [role="radio"]')]
+      for (const el of all) {
+        const t = (el.innerText || el.textContent || '').trim()
+        if (t === label || t.startsWith(label)) {
+          try { el.click(); return true } catch {}
+        }
+      }
+      // Fallback: procura por aria-label
+      const ariaMatch = document.querySelector(`tp-yt-paper-radio-button[name*="${label.includes('Sim') ? 'MADE_FOR_KIDS' : 'NOT_MADE_FOR_KIDS'}"]`)
+      if (ariaMatch) { try { ariaMatch.click(); return true } catch {} }
+      return false
+    }, kidsText)
+    if (!clickedKids) log(`   ⚠️ Nao consegui marcar "${kidsText}" — videos com erro nao publicam`)
+    else log(`   ✓ Marcou "${kidsText}"`)
+    await delay(1500)
+    await snap('04b-after-kids')
 
     // ── Tags (em "Mostrar mais") ───────────────────────────────
     if (tags.length > 0) {
@@ -179,22 +221,47 @@ export async function postVideoYouTube({
     }
     await delay(1500)
 
-    // ── Aguarda upload finalizar (mostra progresso na lateral) ─
-    log('⏳ Aguardando upload terminar...')
-    await page.waitForFunction(() => {
-      const txt = (document.body.innerText || '').toLowerCase()
-      // Sinais de upload concluido: porcentagem some, ou aparece "verificacoes concluidas"
-      if (/verificações concluídas|verificações em andamento|processando|checks complete/.test(txt)) return true
-      if (/100%/.test(txt)) return true
-      return false
-    }, { timeout: 600000, polling: 3000 }).catch(() => log('⚠️ Status do upload nao confirmado, tentando publicar mesmo assim'))
+    // ── Aguarda upload finalizar — esperando #done-button ficar enabled+visible
+    // v1.0.65: a v anterior usava texto da pagina (frágil) e desistia em 30s,
+    // entao tentava clicar #done-button com disabled hidden -> falhava.
+    // Agora espera ate o botao realmente estar pronto pra clicar.
+    log('⏳ Aguardando upload terminar + botao Publicar ficar enabled (ate 15min)...')
+    // Polling manual — waitForFunction ignorava o timeout customizado.
+    const maxMs = 15 * 60 * 1000
+    const t0 = Date.now()
+    let ready = false
+    let lastPct = -1
+    while (Date.now() - t0 < maxMs) {
+      const state = await page.evaluate(() => {
+        const btn = document.querySelector('#done-button')
+        if (!btn) return { ready: false, pct: null }
+        const disabled = btn.hasAttribute('disabled') || btn.getAttribute('aria-disabled') === 'true' || btn.hasAttribute('hidden')
+        // Pega texto de progresso (ex: "Enviando 25%", "Carregando…")
+        const allText = document.body.innerText || ''
+        const pctMatch = allText.match(/(\d{1,3})%/)
+        return { ready: !disabled, pct: pctMatch ? parseInt(pctMatch[1]) : null }
+      })
+      if (state.ready) { ready = true; break }
+      if (state.pct !== null && state.pct !== lastPct) {
+        log(`   📊 Upload: ${state.pct}%`)
+        lastPct = state.pct
+      }
+      await delay(5000)
+    }
+    if (!ready) {
+      await snap('05-publish-button-not-ready')
+      throw new Error('Upload demorou >15min e botao Publicar nao ficou pronto')
+    }
+    log('✅ Upload terminou, botao Publicar pronto')
     await delay(2000)
+    await snap('06-before-publish')
 
     // ── Botao "Publicar" / "Salvar" (depende da visibility) ────
     log('📤 Clicando Publicar/Salvar...')
-    const pubBtn = page.locator('#done-button, ytcp-button:has-text("Publicar"), ytcp-button:has-text("Salvar"), ytcp-button:has-text("Publish"), ytcp-button:has-text("Save")').first()
+    const pubBtn = page.locator('#done-button').first()
     if (await pubBtn.count() === 0) throw new Error('Botao Publicar/Salvar nao encontrado')
     await pubBtn.click({ force: true, timeout: 10000 })
+    await snap('07-after-publish-click')
 
     // Aguarda confirmacao de publicado (dialog "Video publicado")
     await page.waitForSelector('text=/Vídeo publicado|Video published|Salvo|Saved/i', { timeout: 60000 }).catch(() => {})
