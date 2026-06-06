@@ -121,6 +121,43 @@ async function requestHumanIntervention({ sessionFile, url, username, message, l
 
 const delay = ms => new Promise(r => setTimeout(r, ms))
 
+// v1.0.83: Clica via Win32 API REAL (SetCursorPos + mouse_event).
+// Playwright locator.click() gera evento com isTrusted=false que YT verifica
+// pra disabilitar botoes do modal anti-bot. Win32 mouse gera isTrusted=true =
+// click indistinguivel de humano. Resolve modal "Confirme sua identidade".
+async function clickViaWin32({ page, locator, log }) {
+  const box = await locator.boundingBox()
+  if (!box) throw new Error('boundingBox vazio (elemento nao visivel)')
+  const wi = await page.evaluate(() => ({
+    sx: window.screenX, sy: window.screenY,
+    iw: window.innerWidth, ih: window.innerHeight,
+    ow: window.outerWidth, oh: window.outerHeight,
+  }))
+  // Offset entre origem da janela e origem do viewport (chrome + barra titulo)
+  const chromeOffsetX = Math.round((wi.ow - wi.iw) / 2)
+  const chromeOffsetY = wi.oh - wi.ih - chromeOffsetX // top chrome (titlebar+tabs)
+  const screenX = Math.round(wi.sx + chromeOffsetX + box.x + box.width / 2)
+  const screenY = Math.round(wi.sy + chromeOffsetY + box.y + box.height / 2)
+  log?.(`   🖱️ Win32 click em (${screenX}, ${screenY}) — botao em viewport (${Math.round(box.x)}, ${Math.round(box.y)})`)
+  const { spawn } = await import('child_process')
+  await new Promise((resolve, reject) => {
+    const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `
+      Add-Type @"
+      using System;
+      using System.Runtime.InteropServices;
+      public class W { [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y); [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, uint e); }
+"@
+      [W]::SetCursorPos(${screenX}, ${screenY})
+      Start-Sleep -Milliseconds 150
+      [W]::mouse_event(2, 0, 0, 0, 0)
+      Start-Sleep -Milliseconds 90
+      [W]::mouse_event(4, 0, 0, 0, 0)
+    `])
+    ps.on('exit', code => code === 0 ? resolve() : reject(new Error('PS exit ' + code)))
+    ps.on('error', reject)
+  })
+}
+
 export async function postVideoYouTube(opts) {
   // v1.0.68: wrapper que tenta postar e em caso de bloqueio (verif identidade,
   // 2FA, etc), abre janela Electron pro user resolver, depois TENTA DE NOVO
@@ -417,26 +454,29 @@ async function postVideoYouTubeInternal({
       })
       if (state.hasIdentityModal) {
         modalAvancarTries++
-        if (modalAvancarTries === 1) {
-          // v1.0.80: anti-bot do YT desabilita o botao Avancar no modal de
-          // identidade quando detecta automation. Click via Playwright falha
-          // ('button is disabled'). Unica saida: pausa script ate user clicar
-          // manualmente no Chrome aberto (janela ja eh headless: false).
-          log(`⚠️ Modal "Confirme sua identidade" detectado — botoes disabled pela anti-bot do YT`)
-          log(`👉 CLICA EM "AVANCAR" NO CHROME ABERTO COM O MOUSE — script aguarda 5min`)
-          await snap('05a-identity-await-human')
-          try {
-            await page.waitForFunction(() => {
-              const txt = (document.body.innerText || '').toLowerCase()
-              return !/confirme sua identidade|verify your identity/.test(txt)
-            }, { timeout: 5 * 60 * 1000, polling: 2000 })
-            log(`✅ Modal fechado — continuando upload`)
-            await snap('05b-identity-passed')
-          } catch (e) {
-            log(`❌ Modal nao foi fechado em 5min — abortando`)
-            await snap('05c-identity-timeout')
-            throw new Error('yt_identity_manual_timeout: user nao clicou Avancar no modal em 5min')
+        if (modalAvancarTries <= 3) {
+          // v1.0.83: usa Win32 SetCursorPos+mouse_event pra clicar REAL no Avancar
+          // (isTrusted=true). Anti-bot YT verifica isTrusted no click pra
+          // disabilitar botao. Click via Win32 = click humano = passa.
+          log(`🔓 Modal identidade detectado — tentando Win32 click (tentativa ${modalAvancarTries}/3)`)
+          const avancarLoc = page.locator('button, [role="button"]').filter({ hasText: /^(Avançar|Avancar|Next|Continuar|Continue)$/i }).first()
+          if (await avancarLoc.count() > 0) {
+            try {
+              await avancarLoc.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {})
+              await delay(400 + Math.floor(Math.random() * 400))
+              await clickViaWin32({ page, locator: avancarLoc, log })
+              await snap(`05a-win32-click-${modalAvancarTries}`)
+              await delay(3000)
+            } catch (e) {
+              log(`   warning: Win32 click falhou: ${e.message.split('\n')[0].slice(0,80)}`)
+            }
+          } else {
+            log(`   warning: botao Avancar nao encontrado no DOM (modal sem texto reconhecido)`)
           }
+        } else if (modalAvancarTries === 4) {
+          log(`⚠️ Modal persistiu apos 3 Win32 clicks — abortando`)
+          await snap('05b-identity-stuck-after-win32')
+          throw new Error('yt_identity_win32_failed: modal nao fechou apos 3 cliques Win32 reais')
         }
       }
       if (state.ready) { ready = true; break }
