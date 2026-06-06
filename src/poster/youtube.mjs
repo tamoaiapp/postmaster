@@ -146,76 +146,21 @@ async function postVideoYouTubeInternal({
   if (!fs.existsSync(sessionFile)) throw new Error(`Sessao YouTube nao encontrada pra @${account}. Faca login primeiro.`)
   if (!fs.existsSync(videoPath)) throw new Error(`Video nao encontrado: ${videoPath}`)
 
-  // v1.0.81: STEALTH PESADO — usa Chrome real (channel:chrome) + tmp profile
-  // + overrides profundos (WebGL, Canvas, Client Hints, plugins reais).
-  // Antes era chromium headless puro que YT detectava facil e mostrava modal
-  // "Confirme sua identidade" com botoes disabled.
-  const os = await import('node:os')
-  const tmpProfile = path.join(os.tmpdir(), `pm-yt-post-${account}-${Date.now()}`)
-  const ctx = await chromium.launchPersistentContext(tmpProfile, {
-    channel: 'chrome',
-    headless: false, // YT detecta headless via varios sinais; visivel passa
-    viewport: null, // usa size natural da janela
-    locale: 'pt-BR',
-    timezoneId: 'America/Sao_Paulo',
-    args: [
-      '--no-sandbox',
-      '--disable-blink-features=AutomationControlled',
-      '--disable-features=IsolateOrigins,site-per-process',
-      '--no-default-browser-check',
-      '--no-first-run',
-      '--disable-infobars',
-      '--start-maximized',
-    ],
-    ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=IdleDetection'],
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
   })
-  const browser = ctx.browser()
-  // Carrega cookies da sessao salva no Chrome real (launchPersistentContext nao usa storageState)
-  try {
-    const state = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'))
-    if (state.cookies && state.cookies.length) await ctx.addCookies(state.cookies)
-  } catch (e) { log(`   warning: cookies nao carregados: ${e.message.slice(0,60)}`) }
+  const ctx = await browser.newContext({
+    storageState: sessionFile,
+    viewport: { width: 1366, height: 900 },
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+    locale: 'pt-BR',
+  })
   await ctx.addInitScript(() => {
-    // 1. webdriver = undefined
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
-    // 2. plugins realistas (3 plugins padrao do Chrome)
-    Object.defineProperty(navigator, 'plugins', {
-      get: () => {
-        const make = (name, filename, mime) => ({ name, filename, description: '', length: 1, 0: { type: mime } })
-        return [
-          make('Chrome PDF Plugin', 'internal-pdf-viewer', 'application/x-google-chrome-pdf'),
-          make('Chrome PDF Viewer', 'mhjfbmdgcfjbbpaeojofohoefgiehjai', 'application/pdf'),
-          make('Native Client', 'internal-nacl-plugin', 'application/x-nacl'),
-        ]
-      }
-    })
-    // 3. Languages
+    Object.defineProperty(navigator, 'plugins', { get: () => [{ name: 'PDF Viewer' }, { name: 'Chrome PDF Viewer' }] })
     Object.defineProperty(navigator, 'languages', { get: () => ['pt-BR', 'pt', 'en-US', 'en'] })
-    // 4. Hardware concurrency + memory (parece PC real)
-    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 })
-    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 })
-    // 5. window.chrome completo
-    if (!window.chrome) window.chrome = {}
-    window.chrome.app = window.chrome.app || { isInstalled: false }
-    window.chrome.runtime = window.chrome.runtime || {}
-    window.chrome.csi = window.chrome.csi || (() => ({}))
-    window.chrome.loadTimes = window.chrome.loadTimes || (() => ({ commitLoadTime: Date.now()/1000, connectionInfo: 'h2', finishDocumentLoadTime: Date.now()/1000, finishLoadTime: Date.now()/1000, firstPaintAfterLoadTime: 0, firstPaintTime: Date.now()/1000, navigationType: 'Other', npnNegotiatedProtocol: 'h2', requestTime: Date.now()/1000, startLoadTime: Date.now()/1000, wasAlternateProtocolAvailable: false, wasFetchedViaSpdy: true, wasNpnNegotiated: true }))
-    // 6. permissions.query (YT verifica notifications)
-    const origQuery = navigator.permissions && navigator.permissions.query
-    if (origQuery) {
-      navigator.permissions.query = (p) => p && p.name === 'notifications'
-        ? Promise.resolve({ state: Notification.permission, onchange: null })
-        : origQuery.call(navigator.permissions, p)
-    }
-    // 7. WebGL vendor/renderer (YT detecta GPU fake)
-    try {
-      const origGet = WebGLRenderingContext.prototype.getParameter
-      WebGLRenderingContext.prototype.getParameter = function(p) {
-        if (p === 37445) return 'Intel Inc.'
-        if (p === 37446) return 'Intel(R) UHD Graphics 620'
-        return origGet.call(this, p)
-      }
-    } catch {}
+    window.chrome = { runtime: {} }
   })
 
   const page = await ctx.newPage()
