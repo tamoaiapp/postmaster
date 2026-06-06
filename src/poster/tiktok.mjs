@@ -143,7 +143,15 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
     // o TikTok mostra "Algo deu errado / Tentar novamente". Era o que aparecia
     // em todos os fails. Agora aguarda o data-e2e=post_video_button aparecer
     // visivel + enabled, com timeout de 3min (vale ate pra video grande).
-    log('⏳ Aguardando TikTok processar o video (pode levar ate 3min)...')
+    // v1.0.63: timeout dinamico baseado no tamanho do video.
+    // User reportou videos de 100MB+ subindo a 0.15MB/s (TikTok rate-limit).
+    // Calculo: 3min base + 1min por 10MB. Cap 15min.
+    let timeoutMs = 180000
+    try {
+      const sizeMB = fs.statSync(videoPath).size / 1024 / 1024
+      timeoutMs = Math.min(900000, 180000 + (sizeMB * 6000)) // 3min + 6s/MB, max 15min
+    } catch {}
+    log(`⏳ Aguardando TikTok processar (timeout ${Math.round(timeoutMs/60000)}min)...`)
     liveView.updateStatus(liveJobId, 'TikTok processando')
     try {
       await page.waitForFunction(() => {
@@ -152,11 +160,10 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
         if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false
         const r = el.getBoundingClientRect()
         return r.width > 30 && r.height > 16
-      }, { timeout: 180000, polling: 1500 })
+      }, { timeout: timeoutMs, polling: 2000 })
       log('✅ TikTok terminou de processar')
     } catch (e) {
-      log('⚠️ TikTok demorou >3min processando. Pode ser video muito grande ou rede lenta.')
-      // Segue tentando — talvez apareca nos retries do bloco proximo
+      log(`⚠️ TikTok demorou >${Math.round(timeoutMs/60000)}min processando. Video grande ou rede lenta.`)
     }
     await delay(2000)
 
