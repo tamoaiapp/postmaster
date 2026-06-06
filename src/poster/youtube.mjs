@@ -137,9 +137,18 @@ async function clickViaWin32({ page, locator, log }) {
       const inModal = !!b.closest('tp-yt-paper-dialog, [role="dialog"], [role="alertdialog"], .modal, [aria-modal="true"]')
       return { text: b.textContent.trim(), x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), inModal, disabled: b.hasAttribute('disabled') || b.disabled }
     })
-    // Pega o DO MODAL primeiro (modal Confirme identidade tem aria-modal ou role dialog)
-    const inModal = candidates.find(b => b.closest('tp-yt-paper-dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"]'))
-    const btn = inModal || candidates[0]
+    // v1.0.86: pega botao Avancar cujo ANCESTOR contem o texto "Confirme sua identidade"
+    // (era pegando do dialog principal de upload que tb tem "Avancar" em outro lugar)
+    let btn = candidates.find(b => {
+      // Sobe ate 8 niveis procurando o modal certo
+      let p = b.parentElement
+      for (let i = 0; i < 8 && p; i++, p = p.parentElement) {
+        const t = (p.innerText || '').toLowerCase()
+        if (/confirme sua identidade|verify your identity/.test(t)) return true
+      }
+      return false
+    })
+    if (!btn) btn = candidates[0]
     if (!btn) return { found: false, debug }
     // Forca remover disabled (CSS-only ou DOM-only)
     try { btn.removeAttribute('disabled'); btn.removeAttribute('aria-disabled'); btn.style.pointerEvents = 'auto' } catch {}
