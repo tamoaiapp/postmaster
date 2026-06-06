@@ -417,26 +417,26 @@ async function postVideoYouTubeInternal({
       })
       if (state.hasIdentityModal) {
         modalAvancarTries++
-        if (modalAvancarTries <= 3) {
-          // Click via Playwright locator — simula mouseMove + mouseDown/Up real
-          const avancarLoc = page.locator('button, [role="button"]').filter({ hasText: /^(Avançar|Avancar|Next|Continuar|Continue)$/i }).first()
-          if (await avancarLoc.count() > 0) {
-            try {
-              await avancarLoc.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {})
-              await avancarLoc.hover({ timeout: 2000 }).catch(() => {})
-              await delay(300 + Math.floor(Math.random() * 400)) // humanize 300-700ms
-              await avancarLoc.click({ timeout: 5000, delay: 80 + Math.floor(Math.random() * 80) })
-              log(`🔓 Modal identidade — cliquei Avancar (locator real, tentativa ${modalAvancarTries}/3)`)
-              await snap(`05a-identity-avancar-${modalAvancarTries}`)
-              await delay(3000)
-            } catch (e) {
-              log(`   warning: click locator falhou: ${e.message.split('\n')[0].slice(0,60)}`)
-            }
+        if (modalAvancarTries === 1) {
+          // v1.0.80: anti-bot do YT desabilita o botao Avancar no modal de
+          // identidade quando detecta automation. Click via Playwright falha
+          // ('button is disabled'). Unica saida: pausa script ate user clicar
+          // manualmente no Chrome aberto (janela ja eh headless: false).
+          log(`⚠️ Modal "Confirme sua identidade" detectado — botoes disabled pela anti-bot do YT`)
+          log(`👉 CLICA EM "AVANCAR" NO CHROME ABERTO COM O MOUSE — script aguarda 5min`)
+          await snap('05a-identity-await-human')
+          try {
+            await page.waitForFunction(() => {
+              const txt = (document.body.innerText || '').toLowerCase()
+              return !/confirme sua identidade|verify your identity/.test(txt)
+            }, { timeout: 5 * 60 * 1000, polling: 2000 })
+            log(`✅ Modal fechado — continuando upload`)
+            await snap('05b-identity-passed')
+          } catch (e) {
+            log(`❌ Modal nao foi fechado em 5min — abortando`)
+            await snap('05c-identity-timeout')
+            throw new Error('yt_identity_manual_timeout: user nao clicou Avancar no modal em 5min')
           }
-        } else if (modalAvancarTries === 4) {
-          log(`⚠️ Modal "Confirme sua identidade" persistiu apos 3 cliques — YT exige verificacao manual`)
-          await snap('05b-identity-stuck')
-          throw new Error('yt_identity_check_loop: modal Confirme identidade nao some apos clicar Avancar — verifique telefone do canal manualmente')
         }
       }
       if (state.ready) { ready = true; break }
