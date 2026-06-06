@@ -206,8 +206,18 @@ ipcMain.handle('human-intervention:open', async (_, args) => {
       } catch {}
     }
 
-    // UA real (Google bloqueia Electron default)
-    const REAL_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+    // UA real (Google bloqueia Electron default) — v1.0.69 Chrome 132
+    const REAL_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36'
+    const SEC_CH_UA = '"Not A(Brand";v="8", "Chromium";v="132", "Google Chrome";v="132"'
+    // Client Hints + stealth headers
+    electronSes.webRequest.onBeforeSendHeaders((details, cb) => {
+      const h = { ...details.requestHeaders }
+      h['sec-ch-ua'] = SEC_CH_UA
+      h['sec-ch-ua-mobile'] = '?0'
+      h['sec-ch-ua-platform'] = '"Windows"'
+      delete h['Electron']; delete h['electron']
+      cb({ requestHeaders: h })
+    })
 
     const win = new BrowserWindow({
       width: 1100,
@@ -221,6 +231,18 @@ ipcMain.handle('human-intervention:open', async (_, args) => {
       },
     })
     win.webContents.setUserAgent(REAL_UA)
+
+    // Stealth JS antes de cada carregamento — Google detecta navigator.webdriver
+    win.webContents.on('dom-ready', () => {
+      win.webContents.executeJavaScript(`
+        (() => {
+          try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }) } catch {}
+          try { Object.defineProperty(navigator, 'plugins', { get: () => [{ name: 'PDF Viewer' }, { name: 'Chrome PDF Viewer' }, { name: 'Chromium PDF Viewer' }] }) } catch {}
+          try { Object.defineProperty(navigator, 'languages', { get: () => ['pt-BR', 'pt', 'en-US', 'en'] }) } catch {}
+          try { window.chrome = window.chrome || { runtime: {}, app: {}, csi: () => {}, loadTimes: () => ({}) } } catch {}
+        })();
+      `).catch(() => {})
+    })
 
     let closed = false
     const finish = async (reason) => {

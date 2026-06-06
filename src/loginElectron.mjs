@@ -62,7 +62,10 @@ async function doLogin({ platform, username, dataDir }) {
   // User-Agent de Chrome real — Google detecta Electron e bloqueia login (Erro 400).
   // Mesmo que loadURL passe direto pra youtube.com, qualquer redirect pra accounts.google.com
   // precisa de UA de Chrome legit pra nao bloquear.
-  const REAL_CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+  // v1.0.69: UA Chrome 132 (Google ja bloqueia 130 por ser "antigo"). Tambem
+  // aplicamos Client Hints (sec-ch-ua) via webRequest pra parecer Chrome 100%.
+  const REAL_CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36'
+  const SEC_CH_UA = '"Not A(Brand";v="8", "Chromium";v="132", "Google Chrome";v="132"'
 
   const win = new BrowserWindow({
     width: 1080,
@@ -79,6 +82,33 @@ async function doLogin({ platform, username, dataDir }) {
   // Override do User-Agent ANTES de qualquer load
   win.webContents.setUserAgent(REAL_CHROME_UA)
   ses.setUserAgent(REAL_CHROME_UA)
+
+  // v1.0.69: Sobrescreve headers pra adicionar sec-ch-ua* (Client Hints) que
+  // Google verifica pra detectar Electron/headless. Sem isso, mesmo com UA
+  // Chrome, o login dá "Esse navegador ou app pode nao ser seguro".
+  ses.webRequest.onBeforeSendHeaders((details, cb) => {
+    const h = { ...details.requestHeaders }
+    h['sec-ch-ua'] = SEC_CH_UA
+    h['sec-ch-ua-mobile'] = '?0'
+    h['sec-ch-ua-platform'] = '"Windows"'
+    // Remove header que delata Electron
+    delete h['Electron']
+    delete h['electron']
+    cb({ requestHeaders: h })
+  })
+
+  // v1.0.69: stealth JS — Google checa navigator.webdriver e propriedades
+  // que Chromium puro nao tem. Sobrescreve antes de qualquer script da pagina.
+  win.webContents.on('dom-ready', () => {
+    win.webContents.executeJavaScript(`
+      (() => {
+        try { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }) } catch {}
+        try { Object.defineProperty(navigator, 'plugins', { get: () => [{ name: 'PDF Viewer' }, { name: 'Chrome PDF Viewer' }, { name: 'Chromium PDF Viewer' }] }) } catch {}
+        try { Object.defineProperty(navigator, 'languages', { get: () => ['pt-BR', 'pt', 'en-US', 'en'] }) } catch {}
+        try { window.chrome = window.chrome || { runtime: {}, app: {}, csi: () => {}, loadTimes: () => ({}) } } catch {}
+      })();
+    `).catch(() => {})
+  })
 
   await win.loadURL(loginUrl)
 
