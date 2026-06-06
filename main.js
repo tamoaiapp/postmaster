@@ -398,15 +398,12 @@ ipcMain.handle('accounts:add', async (_, { platform, username }) => {
   const accounts = readDB('accounts.json')
   if (accounts.find(a => a.platform === platform && a.username === username))
     return { ok: false, error: 'Conta já adicionada' }
-  // Abre login: IG/TT via janela Electron, YouTube via Playwright (Google bloqueia Electron)
+  // v1.0.76: unifica login YT — loginViaElectron ja roteia pra doLoginYouTubeViaChrome
+  // (Chrome real + banner + captura .channelId). Antes main.js chamava loginYouTube.mjs
+  // que usava Chromium do bundle e NAO salvava .channelId — quebrava o fix v1.0.75
   try {
-    if (platform === 'youtube') {
-      const { loginYouTubeViaPlaywright } = await import('./src/loginYouTube.mjs')
-      await loginYouTubeViaPlaywright({ username, dataDir: DATA_DIR })
-    } else {
-      const { loginViaElectron } = await import('./src/loginElectron.mjs')
-      await loginViaElectron({ platform, username, dataDir: DATA_DIR })
-    }
+    const { loginViaElectron } = await import('./src/loginElectron.mjs')
+    await loginViaElectron({ platform, username, dataDir: DATA_DIR })
     const account = { id: Date.now().toString(), platform, username, addedAt: new Date().toISOString() }
     accounts.push(account)
     writeDB('accounts.json', accounts)
