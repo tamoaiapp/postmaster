@@ -136,15 +136,22 @@ export default async function jobRunner(job, dataDir, log) {
       } catch (e) { log(`   ⚠️ Smart cut falhou: ${e.message.split('\n')[0]}`) }
     }
 
-    // Se eh "video inteiro" mas passa do limite, corta inicio com platformLimit
-    if (!cutRange && job.cutType === 'full' && video.duracao > platformLimit) {
-      cutRange = { start: 0, end: platformLimit }
-      log(`✂️ Vídeo inteiro maior que limite (${platformLimit}s) — cortando primeiros ${platformLimit}s`)
-    }
-
-    // Default (cutType !== 'full' e smart cut falhou): pega primeiros targetCut segundos
-    if (!cutRange && job.cutType !== 'full' && video.duracao > targetCut) {
-      cutRange = { start: 0, end: targetCut }
+    // v1.0.71: YouTube longo NUNCA corta na fase de download — baixa video
+    // inteiro. O corte pra 8-12min eh feito DEPOIS pelo corteDenso/auto-edit
+    // 16:9. Antes esse default pegava primeiros targetCut segundos (~120s) e
+    // o pipeline YT acabava postando video de 2min em vez de 12.
+    if (!isYoutubePlatform) {
+      // Se eh "video inteiro" mas passa do limite, corta inicio com platformLimit
+      if (!cutRange && job.cutType === 'full' && video.duracao > platformLimit) {
+        cutRange = { start: 0, end: platformLimit }
+        log(`✂️ Vídeo inteiro maior que limite (${platformLimit}s) — cortando primeiros ${platformLimit}s`)
+      }
+      // Default (cutType !== 'full' e smart cut falhou): pega primeiros targetCut segundos
+      if (!cutRange && job.cutType !== 'full' && video.duracao > targetCut) {
+        cutRange = { start: 0, end: targetCut }
+      }
+    } else {
+      log(`📺 YouTube: baixando video inteiro (${video.duracao || '?'}s)`)
     }
 
     try {
