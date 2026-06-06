@@ -396,16 +396,38 @@ async function postVideoYouTubeInternal({
     const t0 = Date.now()
     let ready = false
     let lastPct = -1
+    // v1.0.78: detecta modal "Confirme sua identidade" que aparece DURANTE upload
+    // (depois do upload concluir, antes do botao Publicar ficar enabled).
+    // Tenta clicar "Avancar" pra prosseguir — se aparecer SMS/2FA depois,
+    // o post falha e user precisa fazer manual via intervencao humana
     while (Date.now() - t0 < maxMs) {
       const state = await page.evaluate(() => {
+        // 1. Detecta modal "Confirme sua identidade" e tenta clicar Avancar
+        const txt = (document.body.innerText || '').toLowerCase()
+        const hasIdentityModal = /confirme sua identidade|verify your identity/.test(txt)
+        let clickedAvancar = false
+        if (hasIdentityModal) {
+          const buttons = [...document.querySelectorAll('button, [role="button"]')]
+          const avancar = buttons.find(b => {
+            const t = (b.textContent || '').trim().toLowerCase()
+            return ['avançar', 'avancar', 'next', 'continuar', 'continue'].includes(t)
+          })
+          if (avancar) { try { avancar.click(); clickedAvancar = true } catch {} }
+        }
+        // 2. Estado do botao Publicar
         const btn = document.querySelector('#done-button')
-        if (!btn) return { ready: false, pct: null }
+        if (!btn) return { ready: false, pct: null, clickedAvancar, hasIdentityModal }
         const disabled = btn.hasAttribute('disabled') || btn.getAttribute('aria-disabled') === 'true' || btn.hasAttribute('hidden')
-        // Pega texto de progresso (ex: "Enviando 25%", "Carregando…")
         const allText = document.body.innerText || ''
         const pctMatch = allText.match(/(\d{1,3})%/)
-        return { ready: !disabled, pct: pctMatch ? parseInt(pctMatch[1]) : null }
+        return { ready: !disabled, pct: pctMatch ? parseInt(pctMatch[1]) : null, clickedAvancar, hasIdentityModal }
       })
+      if (state.clickedAvancar) {
+        log(`🔓 Modal "Confirme sua identidade" detectado — cliquei Avancar`)
+        await snap('05a-identity-avancar')
+      } else if (state.hasIdentityModal) {
+        log(`⚠️ Modal identidade presente mas sem botao Avancar visivel`)
+      }
       if (state.ready) { ready = true; break }
       if (state.pct !== null && state.pct !== lastPct) {
         log(`   📊 Upload: ${state.pct}%`)
