@@ -61,50 +61,78 @@ async function doLoginYouTubeViaChrome({ username, dataDir }) {
   }
 
   const page = await ctx.newPage()
+
+  // v1.0.73: injeta banner explicativo no topo da pagina antes de qualquer
+  // navegacao. Banner reforca: "FECHE quando estiver no canal certo".
+  await ctx.addInitScript(() => {
+    const showBanner = () => {
+      if (document.getElementById('pm-login-banner')) return
+      if (!document.body) return
+      const b = document.createElement('div')
+      b.id = 'pm-login-banner'
+      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;padding:14px 20px;font-family:Segoe UI,sans-serif;font-size:13px;display:flex;align-items:center;gap:14px;box-shadow:0 2px 12px rgba(0,0,0,.3)'
+      b.innerHTML = '<span style="font-size:22px">📺</span><div style="flex:1"><strong style="font-size:14px">PostMaster: Login YouTube</strong><br><span style="opacity:.95;font-size:12px">1) Faça login com sua conta Google.<br>2) Se você tem MAIS DE UM CANAL, troque pelo menu da foto de perfil (canto superior direito) e escolha o canal que vai postar.<br>3) Quando estiver no canal certo, <strong>FECHE ESTA JANELA</strong> — o app vai pegar exatamente o canal que tá aberto.</span></div>'
+      document.body.insertBefore(b, document.body.firstChild)
+      document.body.style.paddingTop = '110px'
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', showBanner)
+    } else {
+      showBanner()
+    }
+    // Reinjeta a cada 1s pq YouTube re-renderiza
+    setInterval(showBanner, 1500)
+  })
+
   await page.goto('https://studio.youtube.com/', { waitUntil: 'domcontentloaded', timeout: 60000 })
 
-  // Aguarda user logar (URL vira studio.youtube.com/channel/...)
+  // v1.0.73: aguarda user FECHAR a janela (em vez de detectar auto).
+  // No momento que fecha, pega a URL ATUAL = canal escolhido.
   return new Promise(async (resolve, reject) => {
     let settled = false
-    const cleanup = async () => { try { await ctx.close() } catch {} }
+    let lastUrl = ''
     const timeoutId = setTimeout(async () => {
       if (settled) return; settled = true
-      await cleanup()
-      reject(new Error('Tempo esgotado — login não concluído em 5 minutos.'))
-    }, 5 * 60 * 1000)
+      try { await ctx.close() } catch {}
+      reject(new Error('Tempo esgotado — login nao concluido em 10 minutos.'))
+    }, 10 * 60 * 1000)
 
+    // Polling pra capturar ultima URL antes de fechar
     const interval = setInterval(async () => {
       if (settled) return
       try {
-        const closedByUser = ctx.pages().length === 0
-        const url = closedByUser ? '' : (ctx.pages()[0]?.url() || '')
-        if (/studio\.youtube\.com\/channel\//.test(url)) {
+        const pages = ctx.pages()
+        if (pages.length === 0) {
+          // User fechou todas as paginas
           settled = true
           clearTimeout(timeoutId); clearInterval(interval)
-          // Aguarda 5s pra garantir que cookies estabilizaram
-          await new Promise(r => setTimeout(r, 5000))
-          try { await ctx.storageState({ path: sessionFile }) } catch {}
-          // v1.0.72: salva o channelId pra postVideoYouTube ir direto nesse canal
-          // (evita cair no canal padrao da conta Google se user tem multiplos canais).
-          try {
-            const m = url.match(/studio\.youtube\.com\/channel\/(UC[\w-]+)/)
-            if (m) {
-              const channelIdFile = sessionFile.replace(/\.json$/, '.channelId')
-              fs.writeFileSync(channelIdFile, m[1])
-            }
-          } catch {}
-          await cleanup()
+          if (!/studio\.youtube\.com\/channel\//.test(lastUrl)) {
+            reject(new Error('Fechou sem chegar no canal. Tente de novo e fique no painel do canal antes de fechar.'))
+            return
+          }
+          // lastUrl ja tem o channel — extrai e salva
+          const m = lastUrl.match(/studio\.youtube\.com\/channel\/(UC[\w-]+)/)
+          if (m) {
+            const channelIdFile = sessionFile.replace(/\.json$/, '.channelId')
+            try { fs.writeFileSync(channelIdFile, m[1]) } catch {}
+          }
           resolve({ ok: true, sessionFile })
           return
         }
-        if (closedByUser) {
-          settled = true
-          clearTimeout(timeoutId); clearInterval(interval)
-          await cleanup()
-          reject(new Error('Janela de login fechada antes de concluir.'))
-        }
+        const u = pages[0].url()
+        if (u) lastUrl = u
       } catch {}
-    }, 2000)
+    }, 1000)
+
+    // Listener pra session.storageState — salva ANTES de fechar
+    ctx.on('close', async () => {
+      try { await ctx.storageState({ path: sessionFile }) } catch {}
+    })
+    // Salva tb periodicamente caso o close listener nao dispare
+    const saveInterval = setInterval(async () => {
+      if (settled) { clearInterval(saveInterval); return }
+      try { await ctx.storageState({ path: sessionFile }) } catch {}
+    }, 5000)
   })
 }
 
