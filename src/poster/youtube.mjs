@@ -67,6 +67,12 @@ export async function postVideoYouTube({
     await delay(3000)
     await snap('01-after-goto')
 
+    // v1.0.67: detecta sessao expirada antes de seguir
+    const currentUrl = page.url()
+    if (currentUrl.includes('accounts.google.com') || currentUrl.includes('/signin') || currentUrl.includes('ServiceLogin')) {
+      throw new Error('yt_session_expired: Sessao YouTube expirou. Vai em Contas no app, remove a conta YouTube e faz login de novo.')
+    }
+
     // Fecha qualquer modal/dialog de boas-vindas aberto
     await page.evaluate(() => {
       const closers = document.querySelectorAll('button, [role="button"]')
