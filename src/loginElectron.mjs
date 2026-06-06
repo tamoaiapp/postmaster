@@ -26,10 +26,77 @@ export async function loginViaElectron({ platform, username, dataDir }) {
   }
   activeLogins.add(lockKey)
   try {
+    // v1.0.70: YouTube via Playwright + Chrome REAL do sistema.
+    // Google blacklistou Electron + Chromium puro. Chrome real passa.
+    if (platform === 'youtube') {
+      return await doLoginYouTubeViaChrome({ username, dataDir })
+    }
     return await doLogin({ platform, username, dataDir })
   } finally {
     activeLogins.delete(lockKey)
   }
+}
+
+// v1.0.70: Login YouTube via Chrome REAL do sistema. Google detecta e bloqueia
+// Electron + Chromium custom, mas aceita Chrome legítimo. Usa Playwright
+// launchPersistentContext com channel: 'chrome'.
+async function doLoginYouTubeViaChrome({ username, dataDir }) {
+  const { chromium } = await import('playwright')
+  const os = await import('node:os')
+  const sessionFile = path.join(dataDir, 'sessions', `yt-${username}.json`)
+  fs.mkdirSync(path.dirname(sessionFile), { recursive: true })
+
+  const tmpProfile = path.join(os.tmpdir(), `pm-yt-login-${username}-${Date.now()}`)
+  let ctx
+  try {
+    ctx = await chromium.launchPersistentContext(tmpProfile, {
+      channel: 'chrome',
+      headless: false,
+      viewport: { width: 1280, height: 900 },
+      locale: 'pt-BR',
+      args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
+    })
+  } catch (e) {
+    throw new Error(`Chrome não encontrado no sistema. Instale o Google Chrome e tente de novo. (${e.message.slice(0,60)})`)
+  }
+
+  const page = await ctx.newPage()
+  await page.goto('https://studio.youtube.com/', { waitUntil: 'domcontentloaded', timeout: 60000 })
+
+  // Aguarda user logar (URL vira studio.youtube.com/channel/...)
+  return new Promise(async (resolve, reject) => {
+    let settled = false
+    const cleanup = async () => { try { await ctx.close() } catch {} }
+    const timeoutId = setTimeout(async () => {
+      if (settled) return; settled = true
+      await cleanup()
+      reject(new Error('Tempo esgotado — login não concluído em 5 minutos.'))
+    }, 5 * 60 * 1000)
+
+    const interval = setInterval(async () => {
+      if (settled) return
+      try {
+        const closedByUser = ctx.pages().length === 0
+        const url = closedByUser ? '' : (ctx.pages()[0]?.url() || '')
+        if (/studio\.youtube\.com\/channel\//.test(url)) {
+          settled = true
+          clearTimeout(timeoutId); clearInterval(interval)
+          // Aguarda 5s pra garantir que cookies estabilizaram
+          await new Promise(r => setTimeout(r, 5000))
+          try { await ctx.storageState({ path: sessionFile }) } catch {}
+          await cleanup()
+          resolve({ ok: true, sessionFile })
+          return
+        }
+        if (closedByUser) {
+          settled = true
+          clearTimeout(timeoutId); clearInterval(interval)
+          await cleanup()
+          reject(new Error('Janela de login fechada antes de concluir.'))
+        }
+      } catch {}
+    }, 2000)
+  })
 }
 
 async function doLogin({ platform, username, dataDir }) {
