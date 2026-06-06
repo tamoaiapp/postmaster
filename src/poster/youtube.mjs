@@ -182,7 +182,20 @@ async function postVideoYouTubeInternal({
   try {
     log('🌐 Abrindo YouTube Studio...')
     liveView.updateStatus(liveJobId, 'Abrindo YouTube Studio')
-    await page.goto('https://studio.youtube.com/', { waitUntil: 'domcontentloaded', timeout: 60000 })
+    // v1.0.72: se temos channelId salvo do login, vai DIRETO no canal certo
+    // (evita cair no canal padrao da conta Google se tem multiplos canais).
+    const channelIdFile = sessionFile.replace(/\.json$/, '.channelId')
+    let targetUrl = 'https://studio.youtube.com/'
+    try {
+      if (fs.existsSync(channelIdFile)) {
+        const chId = fs.readFileSync(channelIdFile, 'utf-8').trim()
+        if (/^UC[\w-]+$/.test(chId)) {
+          targetUrl = `https://studio.youtube.com/channel/${chId}/`
+          log(`   📺 Forcando canal ${chId}`)
+        }
+      }
+    } catch {}
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60000 })
     await delay(3000)
     await snap('01-after-goto')
 

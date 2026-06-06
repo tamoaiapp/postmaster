@@ -84,6 +84,15 @@ async function doLoginYouTubeViaChrome({ username, dataDir }) {
           // Aguarda 5s pra garantir que cookies estabilizaram
           await new Promise(r => setTimeout(r, 5000))
           try { await ctx.storageState({ path: sessionFile }) } catch {}
+          // v1.0.72: salva o channelId pra postVideoYouTube ir direto nesse canal
+          // (evita cair no canal padrao da conta Google se user tem multiplos canais).
+          try {
+            const m = url.match(/studio\.youtube\.com\/channel\/(UC[\w-]+)/)
+            if (m) {
+              const channelIdFile = sessionFile.replace(/\.json$/, '.channelId')
+              fs.writeFileSync(channelIdFile, m[1])
+            }
+          } catch {}
           await cleanup()
           resolve({ ok: true, sessionFile })
           return
