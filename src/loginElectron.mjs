@@ -150,10 +150,12 @@ async function doLoginYouTubeViaChrome({ username, dataDir }) {
           resolve({ ok: true, sessionFile })
           return
         }
-        const u = pages[0].url()
-        if (u) {
+        // v1.0.77: itera TODAS as tabs (Chrome pode abrir extras durante login
+        // — accounts.google.com, about:blank — e pages[0] pode ser uma delas)
+        for (const p of pages) {
+          const u = p.url()
+          if (!u) continue
           lastUrl = u
-          // v1.0.75: ja salva channelId aqui (nao espera o close)
           const m = u.match(/studio\.youtube\.com\/channel\/(UC[\w-]+)/)
           if (m && m[1] !== lastChannelId) {
             lastChannelId = m[1]
