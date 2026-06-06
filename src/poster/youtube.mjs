@@ -126,19 +126,32 @@ const delay = ms => new Promise(r => setTimeout(r, ms))
 // pra disabilitar botoes do modal anti-bot. Win32 mouse gera isTrusted=true =
 // click indistinguivel de humano. Resolve modal "Confirme sua identidade".
 async function clickViaWin32({ page, locator, log }) {
-  const box = await locator.boundingBox()
-  if (!box) throw new Error('boundingBox vazio (elemento nao visivel)')
-  const wi = await page.evaluate(() => ({
-    sx: window.screenX, sy: window.screenY,
-    iw: window.innerWidth, ih: window.innerHeight,
-    ow: window.outerWidth, oh: window.outerHeight,
-  }))
-  // Offset entre origem da janela e origem do viewport (chrome + barra titulo)
-  const chromeOffsetX = Math.round((wi.ow - wi.iw) / 2)
-  const chromeOffsetY = wi.oh - wi.ih - chromeOffsetX // top chrome (titlebar+tabs)
-  const screenX = Math.round(wi.sx + chromeOffsetX + box.x + box.width / 2)
-  const screenY = Math.round(wi.sy + chromeOffsetY + box.y + box.height / 2)
-  log?.(`   🖱️ Win32 click em (${screenX}, ${screenY}) — botao em viewport (${Math.round(box.x)}, ${Math.round(box.y)})`)
+  // v1.0.84: pega target via getBoundingClientRect direto + remove disabled antes
+  const target = await page.evaluate(() => {
+    const all = [...document.querySelectorAll('button, [role="button"]')]
+    const btn = all.find(b => /^(avançar|avancar|next|continuar|continue)$/i.test((b.textContent || '').trim()))
+    if (!btn) return null
+    // Forca remover disabled (CSS-only ou DOM-only) ANTES do click
+    try { btn.removeAttribute('disabled'); btn.removeAttribute('aria-disabled'); btn.style.pointerEvents = 'auto'; btn.style.opacity = '1' } catch {}
+    const r = btn.getBoundingClientRect()
+    return {
+      centerX: r.left + r.width / 2,
+      centerY: r.top + r.height / 2,
+      sx: window.screenX, sy: window.screenY,
+      iw: window.innerWidth, ih: window.innerHeight,
+      ow: window.outerWidth, oh: window.outerHeight,
+      wasDisabled: btn.hasAttribute('disabled') || btn.disabled || btn.getAttribute('aria-disabled') === 'true',
+      text: btn.textContent.trim().slice(0, 30),
+    }
+  })
+  if (!target) throw new Error('botao Avancar nao encontrado no DOM')
+  // Top chrome (titlebar+tabs+URL bar) = outerHeight - innerHeight (Windows nao tem bottom border)
+  // Bordas laterais = (outerWidth - innerWidth) / 2 (geralmente 0 no Win10/11)
+  const topChrome = target.oh - target.ih
+  const sideBorder = Math.max(0, (target.ow - target.iw) / 2)
+  const screenX = Math.round(target.sx + sideBorder + target.centerX)
+  const screenY = Math.round(target.sy + topChrome + target.centerY)
+  log?.(`   🖱️ Win32 click em (${screenX}, ${screenY}) — botao "${target.text}" viewport (${Math.round(target.centerX)}, ${Math.round(target.centerY)}) topChrome=${topChrome} wasDisabled=${target.wasDisabled}`)
   const { spawn } = await import('child_process')
   await new Promise((resolve, reject) => {
     const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `
