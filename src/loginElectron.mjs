@@ -117,6 +117,11 @@ async function doLoginYouTubeViaChrome({ username, dataDir }) {
 
   // v1.0.73: aguarda user FECHAR a janela (em vez de detectar auto).
   // No momento que fecha, pega a URL ATUAL = canal escolhido.
+  // v1.0.75: salva .channelId TODA vez que ve /channel/UCxxx na URL — assim
+  // se user fechar em outra URL (settings, conta, etc) ainda temos o ultimo
+  // canal visitado salvo. Antes so salvava no close → perdia se URL nao tinha.
+  const channelIdFile = sessionFile.replace(/\.json$/, '.channelId')
+  let lastChannelId = ''
   return new Promise(async (resolve, reject) => {
     let settled = false
     let lastUrl = ''
@@ -135,15 +140,10 @@ async function doLoginYouTubeViaChrome({ username, dataDir }) {
           // User fechou todas as paginas
           settled = true
           clearTimeout(timeoutId); clearInterval(interval)
-          if (!/studio\.youtube\.com\/channel\//.test(lastUrl)) {
-            reject(new Error('Fechou sem chegar no canal. Tente de novo e fique no painel do canal antes de fechar.'))
+          // v1.0.75: se NUNCA viu /channel/UCxxx durante a sessao = nao logou
+          if (!lastChannelId) {
+            reject(new Error('Fechou sem passar pelo canal. Tente de novo e CLIQUE no canal certo no menu lateral antes de fechar.'))
             return
-          }
-          // lastUrl ja tem o channel — extrai e salva
-          const m = lastUrl.match(/studio\.youtube\.com\/channel\/(UC[\w-]+)/)
-          if (m) {
-            const channelIdFile = sessionFile.replace(/\.json$/, '.channelId')
-            try { fs.writeFileSync(channelIdFile, m[1]) } catch {}
           }
           // v1.0.73: tb gera cookies Netscape pro yt-dlp usar a MESMA conta pra baixar
           await exportCookiesNetscape(sessionFile, cookiesTxtFile)
@@ -151,7 +151,15 @@ async function doLoginYouTubeViaChrome({ username, dataDir }) {
           return
         }
         const u = pages[0].url()
-        if (u) lastUrl = u
+        if (u) {
+          lastUrl = u
+          // v1.0.75: ja salva channelId aqui (nao espera o close)
+          const m = u.match(/studio\.youtube\.com\/channel\/(UC[\w-]+)/)
+          if (m && m[1] !== lastChannelId) {
+            lastChannelId = m[1]
+            try { fs.writeFileSync(channelIdFile, m[1]) } catch {}
+          }
+        }
       } catch {}
     }, 1000)
 
