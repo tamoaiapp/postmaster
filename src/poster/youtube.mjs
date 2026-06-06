@@ -126,32 +126,52 @@ const delay = ms => new Promise(r => setTimeout(r, ms))
 // pra disabilitar botoes do modal anti-bot. Win32 mouse gera isTrusted=true =
 // click indistinguivel de humano. Resolve modal "Confirme sua identidade".
 async function clickViaWin32({ page, locator, log }) {
-  // v1.0.84: pega target via getBoundingClientRect direto + remove disabled antes
+  // v1.0.85: lista TODOS botoes Avancar pra log + pega o do MODAL (nao do dialog principal).
+  // Modal "Confirme sua identidade" tem botoes dentro de tp-yt-paper-dialog ou role=dialog
   const target = await page.evaluate(() => {
     const all = [...document.querySelectorAll('button, [role="button"]')]
-    const btn = all.find(b => /^(avançar|avancar|next|continuar|continue)$/i.test((b.textContent || '').trim()))
-    if (!btn) return null
-    // Forca remover disabled (CSS-only ou DOM-only) ANTES do click
-    try { btn.removeAttribute('disabled'); btn.removeAttribute('aria-disabled'); btn.style.pointerEvents = 'auto'; btn.style.opacity = '1' } catch {}
+    const candidates = all.filter(b => /^(avançar|avancar|next|continuar|continue)$/i.test((b.textContent || '').trim()))
+    // Diagnostica
+    const debug = candidates.map(b => {
+      const r = b.getBoundingClientRect()
+      const inModal = !!b.closest('tp-yt-paper-dialog, [role="dialog"], [role="alertdialog"], .modal, [aria-modal="true"]')
+      return { text: b.textContent.trim(), x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), inModal, disabled: b.hasAttribute('disabled') || b.disabled }
+    })
+    // Pega o DO MODAL primeiro (modal Confirme identidade tem aria-modal ou role dialog)
+    const inModal = candidates.find(b => b.closest('tp-yt-paper-dialog, [role="dialog"], [role="alertdialog"], [aria-modal="true"]'))
+    const btn = inModal || candidates[0]
+    if (!btn) return { found: false, debug }
+    // Forca remover disabled (CSS-only ou DOM-only)
+    try { btn.removeAttribute('disabled'); btn.removeAttribute('aria-disabled'); btn.style.pointerEvents = 'auto' } catch {}
     const r = btn.getBoundingClientRect()
     return {
+      found: true,
       centerX: r.left + r.width / 2,
       centerY: r.top + r.height / 2,
       sx: window.screenX, sy: window.screenY,
       iw: window.innerWidth, ih: window.innerHeight,
       ow: window.outerWidth, oh: window.outerHeight,
-      wasDisabled: btn.hasAttribute('disabled') || btn.disabled || btn.getAttribute('aria-disabled') === 'true',
+      dpr: window.devicePixelRatio,
       text: btn.textContent.trim().slice(0, 30),
+      debug,
     }
   })
-  if (!target) throw new Error('botao Avancar nao encontrado no DOM')
-  // Top chrome (titlebar+tabs+URL bar) = outerHeight - innerHeight (Windows nao tem bottom border)
-  // Bordas laterais = (outerWidth - innerWidth) / 2 (geralmente 0 no Win10/11)
-  const topChrome = target.oh - target.ih
+  if (!target || !target.found) {
+    log?.(`   debug botoes Avancar: ${JSON.stringify(target?.debug || [])}`)
+    throw new Error('botao Avancar nao encontrado no DOM')
+  }
+  log?.(`   debug all-avancar: ${JSON.stringify(target.debug)}`)
+  // v1.0.85: topChrome FIXO conservador. Em DPI scaling, oh-ih pode dar negativo
+  // ou errado. Chrome real no Windows: titlebar 32px + tabs 32px + URL bar 40px ~ 104px (com tabs visiveis).
+  // Sem DPI scaling. Conservador: 110px.
+  let topChrome = target.oh - target.ih
+  if (topChrome < 50 || topChrome > 200) topChrome = 110
   const sideBorder = Math.max(0, (target.ow - target.iw) / 2)
-  const screenX = Math.round(target.sx + sideBorder + target.centerX)
-  const screenY = Math.round(target.sy + topChrome + target.centerY)
-  log?.(`   🖱️ Win32 click em (${screenX}, ${screenY}) — botao "${target.text}" viewport (${Math.round(target.centerX)}, ${Math.round(target.centerY)}) topChrome=${topChrome} wasDisabled=${target.wasDisabled}`)
+  // Aplica DPI scaling — Win32 SetCursorPos usa physical pixels
+  const dpr = target.dpr || 1
+  const screenX = Math.round((target.sx + sideBorder + target.centerX) * dpr)
+  const screenY = Math.round((target.sy + topChrome + target.centerY) * dpr)
+  log?.(`   🖱️ Win32 click (${screenX}, ${screenY}) — "${target.text}" vp(${Math.round(target.centerX)},${Math.round(target.centerY)}) topChrome=${topChrome} dpr=${dpr}`)
   const { spawn } = await import('child_process')
   await new Promise((resolve, reject) => {
     const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `
