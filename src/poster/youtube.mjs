@@ -49,38 +49,44 @@ export async function postVideoYouTube({
   if (jobId) liveView.attachPage(liveJobId, page)
   else liveView.register(liveJobId, page, { account, platform: 'youtube', status: 'iniciando' })
 
+  // v1.0.65: debug verboso pra rastrear onde upload YT trava
+  const debugDir = path.join(dataDir, 'debug')
+  fs.mkdirSync(debugDir, { recursive: true })
+  const ts = new Date().toISOString().replace(/[:.]/g, '-')
+  const snap = async (label) => {
+    try {
+      await page.screenshot({ path: path.join(debugDir, `yt-${ts}-${label}.png`), fullPage: true })
+      log(`📸 [${label}] URL: ${page.url()}`)
+    } catch (e) { log(`📸 [${label}] screenshot falhou: ${e.message.slice(0,60)}`) }
+  }
+
   try {
     log('🌐 Abrindo YouTube Studio...')
     liveView.updateStatus(liveJobId, 'Abrindo YouTube Studio')
-    await page.goto('https://studio.youtube.com/', { waitUntil: 'domcontentloaded', timeout: 60000 })
+    // Vai DIRETO no upload (mais confiavel que clicar no botao)
+    await page.goto('https://studio.youtube.com/channel/UC/videos/upload', { waitUntil: 'domcontentloaded', timeout: 60000 })
     await delay(3000)
-
-    // Click no botao Carregar/Upload (icone camera+ no topo)
-    const uploadBtn = page.locator('ytcp-button#upload-icon, [aria-label*="Criar"], [aria-label*="Create"], #create-icon').first()
-    if (await uploadBtn.count() > 0) {
-      await uploadBtn.click({ force: true, timeout: 8000 }).catch(() => {})
-      await delay(1500)
-      // Submenu "Enviar videos"
-      const enviarBtn = page.locator('text=/Enviar v.?deos|Upload videos/i').first()
-      if (await enviarBtn.count() > 0) await enviarBtn.click({ force: true }).catch(() => {})
-      await delay(2000)
-    } else {
-      // Fallback: vai direto na URL de upload
-      await page.goto('https://studio.youtube.com/channel/UC/videos/upload', { waitUntil: 'domcontentloaded' }).catch(() => {})
-      await delay(2000)
-    }
+    await snap('01-after-goto')
 
     // SetInputFiles no <input type=file>
-    log('📎 Selecionando arquivo...')
-    liveView.updateStatus(liveJobId, 'Enviando video')
+    log('📎 Aguardando input file...')
+    liveView.updateStatus(liveJobId, 'Aguardando input')
     const fileInput = await page.waitForSelector('input[type="file"]', { state: 'attached', timeout: 60000 })
+    log(`📎 Input file encontrado, enviando arquivo (${Math.round(fs.statSync(videoPath).size/1024/1024)}MB)...`)
     await fileInput.setInputFiles(videoPath)
     await delay(3000)
+    await snap('02-after-setInputFiles')
 
     // Aguarda dialogo de detalhes abrir (input de titulo aparece)
-    log('⏳ Aguardando dialogo de detalhes (upload em paralelo)...')
-    await page.waitForSelector('[id="textbox"], #title-textarea, ytcp-mention-textbox', { timeout: 120000 })
+    log('⏳ Aguardando dialogo de detalhes abrir (ate 3min)...')
+    try {
+      await page.waitForSelector('ytcp-mention-textbox, [id="title-textarea"], #title-textarea', { timeout: 180000 })
+    } catch (e) {
+      await snap('03-textbox-timeout')
+      throw new Error(`Dialogo de detalhes nao abriu em 3min: ${e.message.slice(0,80)}`)
+    }
     await delay(2000)
+    await snap('03-dialog-opened')
 
     // ── Titulo ─────────────────────────────────────────────────
     log('📝 Preenchendo titulo...')
@@ -198,13 +204,7 @@ export async function postVideoYouTube({
   } catch (e) {
     log(`❌ Erro YouTube: ${e.message}`)
     liveView.updateStatus(liveJobId, 'Erro')
-    // Captura debug
-    try {
-      const debugDir = path.join(dataDir, 'debug')
-      fs.mkdirSync(debugDir, { recursive: true })
-      const ts = new Date().toISOString().replace(/[:.]/g, '-')
-      await page.screenshot({ path: path.join(debugDir, `yt-post-fail-${ts}.png`), fullPage: true }).catch(() => {})
-    } catch {}
+    await snap('99-error').catch(() => {})
     throw e
   } finally {
     try { liveView.unregister(liveJobId) } catch {}
