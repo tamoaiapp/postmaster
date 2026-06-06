@@ -162,6 +162,117 @@ ipcMain.handle('update:install', () => {
   try { require('electron-updater').autoUpdater.quitAndInstall() } catch {}
 })
 
+// ── Intervencao humana pra YouTube/etc (v1.0.68) ──────────────────────────────
+// Quando Playwright cai num bloqueio que precisa user (verificacao identidade,
+// captcha, 2FA), abre BrowserWindow Electron com a MESMA sessao pra user
+// resolver. Depois salva cookies atualizados de volta no arquivo de sessao.
+//
+// Args: { sessionFile, url, platform, username, message }
+// Returns: { ok, savedTo, reason? }
+ipcMain.handle('human-intervention:open', async (_, args) => {
+  const { BrowserWindow, session: ses } = require('electron')
+  const { sessionFile, url, platform = 'youtube', username = '', message = '' } = args
+
+  return new Promise(async (resolve) => {
+    // 1. Le storageState atual e injeta na session do Electron
+    let initialState = { cookies: [], origins: [] }
+    try {
+      if (fs.existsSync(sessionFile)) {
+        initialState = JSON.parse(fs.readFileSync(sessionFile, 'utf-8'))
+      }
+    } catch {}
+
+    const partition = `persist:hi-${platform}-${username}-${Date.now()}`
+    const electronSes = ses.fromPartition(partition)
+    await electronSes.clearStorageData({ storages: ['cookies', 'localstorage'] }).catch(() => {})
+
+    // Injeta cookies do Playwright na session
+    for (const c of (initialState.cookies || [])) {
+      try {
+        const domain = c.domain.startsWith('.') ? c.domain.slice(1) : c.domain
+        const cookieUrl = `${c.secure ? 'https' : 'http'}://${domain}${c.path || '/'}`
+        const cookie = {
+          url: cookieUrl,
+          name: c.name,
+          value: c.value,
+          domain: c.domain,
+          path: c.path || '/',
+          secure: !!c.secure,
+          httpOnly: !!c.httpOnly,
+        }
+        if (c.sameSite) cookie.sameSite = String(c.sameSite).toLowerCase()
+        if (c.expires && c.expires > 0) cookie.expirationDate = c.expires
+        await electronSes.cookies.set(cookie).catch(() => {})
+      } catch {}
+    }
+
+    // UA real (Google bloqueia Electron default)
+    const REAL_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+
+    const win = new BrowserWindow({
+      width: 1100,
+      height: 800,
+      title: `Verificação necessária — ${platform}`,
+      autoHideMenuBar: true,
+      webPreferences: {
+        partition,
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    })
+    win.webContents.setUserAgent(REAL_UA)
+
+    let closed = false
+    const finish = async (reason) => {
+      if (closed) return
+      closed = true
+      // Exporta cookies novos pro storageState format
+      try {
+        const cookies = await electronSes.cookies.get({})
+        const newState = {
+          cookies: cookies.map(c => ({
+            name: c.name,
+            value: c.value,
+            domain: c.domain,
+            path: c.path,
+            expires: c.expirationDate || -1,
+            httpOnly: !!c.httpOnly,
+            secure: !!c.secure,
+            sameSite: (c.sameSite === 'lax' ? 'Lax' : c.sameSite === 'strict' ? 'Strict' : 'None'),
+          })),
+          origins: [],
+        }
+        fs.writeFileSync(sessionFile, JSON.stringify(newState, null, 2))
+        resolve({ ok: true, savedTo: sessionFile, reason })
+      } catch (e) {
+        resolve({ ok: false, reason: `falha ao salvar: ${e.message}` })
+      }
+      try { win.destroy() } catch {}
+      // Limpa partition pra nao acumular
+      try { await electronSes.clearStorageData({ storages: ['cookies'] }).catch(() => {}) } catch {}
+    }
+
+    win.on('closed', () => finish('user-closed'))
+
+    // Banner via injeção de CSS+HTML
+    win.webContents.on('did-finish-load', () => {
+      win.webContents.executeJavaScript(`
+        (function(){
+          if (document.getElementById('pm-hi-banner')) return;
+          const b = document.createElement('div');
+          b.id = 'pm-hi-banner';
+          b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;padding:12px 18px;font-family:Segoe UI,sans-serif;font-size:13px;display:flex;align-items:center;gap:12px;box-shadow:0 2px 12px rgba(0,0,0,0.3)';
+          b.innerHTML = '<span style="font-size:20px">⚠️</span><div style="flex:1"><strong>${(message||'O YouTube pediu uma verificação').replace(/'/g,"\\'")}</strong><br><span style="opacity:.9;font-size:12px">Complete a etapa abaixo e <strong>feche esta janela</strong> quando terminar — o app vai retomar a postagem automaticamente.</span></div>';
+          document.body.insertBefore(b, document.body.firstChild);
+          document.body.style.paddingTop = '70px';
+        })();
+      `).catch(() => {})
+    })
+
+    await win.loadURL(url, { userAgent: REAL_UA }).catch(() => {})
+  })
+})
+
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null)
   ensureDataDir()

@@ -16,9 +16,128 @@ import fs from 'fs'
 import path from 'path'
 import * as liveView from '../liveView.mjs'
 
+// v1.0.68: Detecta bloqueio que precisa human action
+// (verificacao identidade, captcha, 2FA, login expirado).
+async function detectHumanRequired(page) {
+  const url = page.url()
+  if (/accounts\.google\.com|\/signin|ServiceLogin|challenge\/recaptcha|two-step/i.test(url)) {
+    return { required: true, kind: 'login_or_2fa', url }
+  }
+  const flag = await page.evaluate(() => {
+    const txt = (document.body.innerText || '').toLowerCase()
+    if (/confirme sua identidade|verify your identity|verifique sua identidade/.test(txt)) return 'identity_check'
+    if (/verifica[çc][aã]o em (duas|2) etapas|2-step verification/.test(txt)) return '2fa'
+    if (/captcha|recaptcha|sou um humano|i'm not a robot/.test(txt)) return 'captcha'
+    if (/senha incorreta|wrong password/.test(txt)) return 'wrong_password'
+    return null
+  }).catch(() => null)
+  if (flag) return { required: true, kind: flag, url }
+  return { required: false }
+}
+
+// Pede ao main process pra abrir BrowserWindow Electron pro user resolver.
+// Retorna true se user terminou (e cookies foram atualizados no sessionFile).
+async function requestHumanIntervention({ sessionFile, url, username, message, log }) {
+  log(`👤 Intervencao humana necessaria: ${message}`)
+  try {
+    // Comunica com main via ipcRenderer NAO funciona aqui (estamos em main no jobRunner).
+    // Acessa direto: a funcao roda no main process, mesmo processo que registra ipcMain.handle.
+    // Importamos o handler em si.
+    const { ipcMain } = await import('electron')
+    // Hack: invoke o handler internamente. Como nao temos sender, chamamos o codigo direto via wrap.
+    // Vou usar app.whenReady() + BrowserWindow direto aqui em vez de IPC.
+    const electron = await import('electron')
+    const result = await new Promise(async (resolve) => {
+      const { BrowserWindow, session: ses } = electron
+      // Carrega state atual
+      let initialState = { cookies: [], origins: [] }
+      try { initialState = JSON.parse(fs.readFileSync(sessionFile, 'utf-8')) } catch {}
+      const partition = `persist:hi-yt-${username}-${Date.now()}`
+      const electronSes = ses.fromPartition(partition)
+      await electronSes.clearStorageData({ storages: ['cookies', 'localstorage'] }).catch(() => {})
+      for (const c of (initialState.cookies || [])) {
+        try {
+          const domain = c.domain.startsWith('.') ? c.domain.slice(1) : c.domain
+          const cookie = {
+            url: `${c.secure ? 'https' : 'http'}://${domain}${c.path || '/'}`,
+            name: c.name, value: c.value, domain: c.domain, path: c.path || '/',
+            secure: !!c.secure, httpOnly: !!c.httpOnly,
+          }
+          if (c.sameSite) cookie.sameSite = String(c.sameSite).toLowerCase()
+          if (c.expires && c.expires > 0) cookie.expirationDate = c.expires
+          await electronSes.cookies.set(cookie).catch(() => {})
+        } catch {}
+      }
+      const REAL_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
+      const win = new BrowserWindow({
+        width: 1100, height: 800,
+        title: `Verificação necessária — YouTube @${username}`,
+        autoHideMenuBar: true,
+        webPreferences: { partition, contextIsolation: true, nodeIntegration: false },
+      })
+      win.webContents.setUserAgent(REAL_UA)
+      let done = false
+      const finish = async () => {
+        if (done) return; done = true
+        try {
+          const cookies = await electronSes.cookies.get({})
+          const newState = {
+            cookies: cookies.map(c => ({
+              name: c.name, value: c.value, domain: c.domain, path: c.path,
+              expires: c.expirationDate || -1,
+              httpOnly: !!c.httpOnly, secure: !!c.secure,
+              sameSite: (c.sameSite === 'lax' ? 'Lax' : c.sameSite === 'strict' ? 'Strict' : 'None'),
+            })),
+            origins: [],
+          }
+          fs.writeFileSync(sessionFile, JSON.stringify(newState, null, 2))
+          resolve(true)
+        } catch (e) { resolve(false) }
+        try { win.destroy() } catch {}
+      }
+      win.on('closed', finish)
+      win.webContents.on('did-finish-load', () => {
+        const msg = message.replace(/'/g, "\\'").replace(/\n/g, ' ')
+        win.webContents.executeJavaScript(`
+          (function(){
+            if (document.getElementById('pm-hi-banner')) return;
+            const b = document.createElement('div');
+            b.id = 'pm-hi-banner';
+            b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;padding:14px 20px;font-family:Segoe UI,sans-serif;font-size:14px;display:flex;align-items:center;gap:14px;box-shadow:0 2px 12px rgba(0,0,0,.3)';
+            b.innerHTML = '<span style="font-size:24px">⚠️</span><div style="flex:1"><strong>PostMaster: ${msg}</strong><br><span style="opacity:.9;font-size:12px">Complete a etapa abaixo e <strong>FECHE ESTA JANELA</strong> quando terminar — o app vai retomar a postagem automaticamente.</span></div>';
+            document.body.insertBefore(b, document.body.firstChild);
+            document.body.style.paddingTop = '80px';
+          })();
+        `).catch(() => {})
+      })
+      await win.loadURL(url, { userAgent: REAL_UA }).catch(() => {})
+    })
+    return result
+  } catch (e) {
+    log(`⚠️ Falha ao abrir janela de intervencao: ${e.message.slice(0,80)}`)
+    return false
+  }
+}
+
 const delay = ms => new Promise(r => setTimeout(r, ms))
 
-export async function postVideoYouTube({
+export async function postVideoYouTube(opts) {
+  // v1.0.68: wrapper que tenta postar e em caso de bloqueio (verif identidade,
+  // 2FA, etc), abre janela Electron pro user resolver, depois TENTA DE NOVO
+  // do zero com sessao renovada. Max 1 retry.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      return await postVideoYouTubeInternal(opts)
+    } catch (e) {
+      const msg = e.message || ''
+      const isHumanError = /yt_session_expired|yt_human_required|requires_human/.test(msg)
+      if (!isHumanError || attempt === 2) throw e
+      opts.log(`🔁 Tentando de novo apos intervencao humana (tentativa ${attempt + 1}/2)...`)
+    }
+  }
+}
+
+async function postVideoYouTubeInternal({
   account, videoPath, title, description, tags = [],
   visibility = 'private', category = 'Entretenimento', madeForKids = false,
   dataDir, log, jobId,
@@ -67,10 +186,26 @@ export async function postVideoYouTube({
     await delay(3000)
     await snap('01-after-goto')
 
-    // v1.0.67: detecta sessao expirada antes de seguir
-    const currentUrl = page.url()
-    if (currentUrl.includes('accounts.google.com') || currentUrl.includes('/signin') || currentUrl.includes('ServiceLogin')) {
-      throw new Error('yt_session_expired: Sessao YouTube expirou. Vai em Contas no app, remove a conta YouTube e faz login de novo.')
+    // v1.0.68: deteccao de bloqueio que precisa human action
+    const block = await detectHumanRequired(page)
+    if (block.required) {
+      log(`⚠️ Bloqueio detectado: ${block.kind} (${block.url.slice(0,80)})`)
+      const userResolved = await requestHumanIntervention({
+        sessionFile, url: block.url, username: account,
+        message: block.kind === 'identity_check' ? 'O YouTube pediu pra confirmar sua identidade'
+              : block.kind === '2fa' ? 'Verificação em duas etapas necessária'
+              : block.kind === 'captcha' ? 'Captcha necessário'
+              : block.kind === 'login_or_2fa' ? 'Sessão expirou — faça login novamente'
+              : 'Verificação necessária',
+        log,
+      })
+      if (!userResolved) {
+        throw new Error('yt_human_required: usuario fechou janela sem completar verificacao')
+      }
+      log('✅ Verificacao concluida pelo usuario. Reiniciando upload...')
+      // Fecha browser atual e sinaliza retry
+      await browser.close().catch(() => {})
+      throw new Error('yt_human_required: sessao renovada, retry')
     }
 
     // Fecha qualquer modal/dialog de boas-vindas aberto
@@ -122,6 +257,17 @@ export async function postVideoYouTube({
       await page.waitForSelector('ytcp-mention-textbox, [id="title-textarea"], #title-textarea', { timeout: 180000 })
     } catch (e) {
       await snap('03-textbox-timeout')
+      // v1.0.68: pode ser modal de identidade aqui tambem
+      const block = await detectHumanRequired(page)
+      if (block.required) {
+        log(`⚠️ Bloqueio mid-upload: ${block.kind}`)
+        const ok = await requestHumanIntervention({
+          sessionFile, url: page.url(), username: account,
+          message: 'O YouTube pediu confirmação durante o upload',
+          log,
+        })
+        if (ok) { await browser.close().catch(() => {}); throw new Error('yt_human_required: retry') }
+      }
       throw new Error(`Dialogo de detalhes nao abriu em 3min: ${e.message.slice(0,80)}`)
     }
     await delay(2000)
