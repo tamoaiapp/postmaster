@@ -166,7 +166,13 @@ export default async function jobRunner(job, dataDir, log) {
     const editMode = job.editMode || 'original'
     let reelPath
 
-    if (editMode === 'auto') {
+    // v1.0.64: YouTube longo NAO usa esse compositing 9:16. Tem seu proprio
+    // pipeline (corteDenso, dublagem, auto-edit 16:9) la embaixo. Antes esse
+    // bloco rodava SEMPRE e quebrava o video do YT (face-tracking 9:16 em
+    // video que devia ficar 16:9 longo). Resultado: _reel.mp4 saia 0MB.
+    if (isYoutubePlatform) {
+      reelPath = videoPath  // passa o video INTEIRO pro pipeline YT
+    } else if (editMode === 'auto') {
       liveView.updateStatus(liveJobId, '🎬 Edição automática (IA)')
       const outPath = videoPath.replace('.mp4', '_reel.mp4')
       const modelPath = path.join(dataDir, 'face-detector.onnx')
