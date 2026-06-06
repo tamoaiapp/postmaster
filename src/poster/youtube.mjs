@@ -400,33 +400,44 @@ async function postVideoYouTubeInternal({
     // (depois do upload concluir, antes do botao Publicar ficar enabled).
     // Tenta clicar "Avancar" pra prosseguir — se aparecer SMS/2FA depois,
     // o post falha e user precisa fazer manual via intervencao humana
+    // v1.0.79: click do modal "Confirme sua identidade" via Playwright locator
+    // (simula mouse real). Antes era el.click() em page.evaluate (JS direto) e
+    // YT detectava como bot, o Avancar nao validava, modal voltava infinitamente
+    let modalAvancarTries = 0
     while (Date.now() - t0 < maxMs) {
       const state = await page.evaluate(() => {
-        // 1. Detecta modal "Confirme sua identidade" e tenta clicar Avancar
         const txt = (document.body.innerText || '').toLowerCase()
         const hasIdentityModal = /confirme sua identidade|verify your identity/.test(txt)
-        let clickedAvancar = false
-        if (hasIdentityModal) {
-          const buttons = [...document.querySelectorAll('button, [role="button"]')]
-          const avancar = buttons.find(b => {
-            const t = (b.textContent || '').trim().toLowerCase()
-            return ['avançar', 'avancar', 'next', 'continuar', 'continue'].includes(t)
-          })
-          if (avancar) { try { avancar.click(); clickedAvancar = true } catch {} }
-        }
-        // 2. Estado do botao Publicar
         const btn = document.querySelector('#done-button')
-        if (!btn) return { ready: false, pct: null, clickedAvancar, hasIdentityModal }
+        if (!btn) return { ready: false, pct: null, hasIdentityModal }
         const disabled = btn.hasAttribute('disabled') || btn.getAttribute('aria-disabled') === 'true' || btn.hasAttribute('hidden')
         const allText = document.body.innerText || ''
         const pctMatch = allText.match(/(\d{1,3})%/)
-        return { ready: !disabled, pct: pctMatch ? parseInt(pctMatch[1]) : null, clickedAvancar, hasIdentityModal }
+        return { ready: !disabled, pct: pctMatch ? parseInt(pctMatch[1]) : null, hasIdentityModal }
       })
-      if (state.clickedAvancar) {
-        log(`🔓 Modal "Confirme sua identidade" detectado — cliquei Avancar`)
-        await snap('05a-identity-avancar')
-      } else if (state.hasIdentityModal) {
-        log(`⚠️ Modal identidade presente mas sem botao Avancar visivel`)
+      if (state.hasIdentityModal) {
+        modalAvancarTries++
+        if (modalAvancarTries <= 3) {
+          // Click via Playwright locator — simula mouseMove + mouseDown/Up real
+          const avancarLoc = page.locator('button, [role="button"]').filter({ hasText: /^(Avançar|Avancar|Next|Continuar|Continue)$/i }).first()
+          if (await avancarLoc.count() > 0) {
+            try {
+              await avancarLoc.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {})
+              await avancarLoc.hover({ timeout: 2000 }).catch(() => {})
+              await delay(300 + Math.floor(Math.random() * 400)) // humanize 300-700ms
+              await avancarLoc.click({ timeout: 5000, delay: 80 + Math.floor(Math.random() * 80) })
+              log(`🔓 Modal identidade — cliquei Avancar (locator real, tentativa ${modalAvancarTries}/3)`)
+              await snap(`05a-identity-avancar-${modalAvancarTries}`)
+              await delay(3000)
+            } catch (e) {
+              log(`   warning: click locator falhou: ${e.message.split('\n')[0].slice(0,60)}`)
+            }
+          }
+        } else if (modalAvancarTries === 4) {
+          log(`⚠️ Modal "Confirme sua identidade" persistiu apos 3 cliques — YT exige verificacao manual`)
+          await snap('05b-identity-stuck')
+          throw new Error('yt_identity_check_loop: modal Confirme identidade nao some apos clicar Avancar — verifique telefone do canal manualmente')
+        }
       }
       if (state.ready) { ready = true; break }
       if (state.pct !== null && state.pct !== lastPct) {
