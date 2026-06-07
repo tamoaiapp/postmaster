@@ -91,26 +91,52 @@ async function doLoginYouTubeViaChrome({ username, dataDir }) {
 
   const page = await ctx.newPage()
 
-  // v1.0.73: injeta banner explicativo no topo da pagina antes de qualquer
-  // navegacao. Banner reforca: "FECHE quando estiver no canal certo".
+  // v1.0.73+v1.1.2: banner 2 estados — Esperando (roxo) → LOGADO! FECHE AGORA (verde grande)
   await ctx.addInitScript(() => {
-    const showBanner = () => {
-      if (document.getElementById('pm-login-banner')) return
+    const PURPLE = 'linear-gradient(135deg,#6366f1,#8b5cf6)'
+    const GREEN = 'linear-gradient(135deg,#10b981,#047857)'
+    const BLINK_CSS = '@keyframes pm-pulse { 0%,100% { transform:scale(1) } 50% { transform:scale(1.03) } } #pm-login-banner.pm-success { animation: pm-pulse 1.2s ease-in-out infinite }'
+
+    const ensureStyle = () => {
+      if (document.getElementById('pm-banner-style')) return
+      const s = document.createElement('style')
+      s.id = 'pm-banner-style'
+      s.textContent = BLINK_CSS
+      document.head?.appendChild(s)
+    }
+
+    const updateBanner = () => {
       if (!document.body) return
-      const b = document.createElement('div')
-      b.id = 'pm-login-banner'
-      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;padding:14px 20px;font-family:Segoe UI,sans-serif;font-size:13px;display:flex;align-items:center;gap:14px;box-shadow:0 2px 12px rgba(0,0,0,.3)'
-      b.innerHTML = '<span style="font-size:22px">📺</span><div style="flex:1"><strong style="font-size:14px">PostMaster: Login YouTube</strong><br><span style="opacity:.95;font-size:12px">1) Faça login com sua conta Google.<br>2) Se você tem MAIS DE UM CANAL, troque pelo menu da foto de perfil (canto superior direito) e escolha o canal que vai postar.<br>3) Quando estiver no canal certo, <strong>FECHE ESTA JANELA</strong> — o app vai pegar exatamente o canal que tá aberto.</span></div>'
-      document.body.insertBefore(b, document.body.firstChild)
-      document.body.style.paddingTop = '110px'
+      ensureStyle()
+      const isInChannel = /studio\.youtube\.com\/channel\/UC[\w-]+/.test(location.href)
+      let b = document.getElementById('pm-login-banner')
+      if (!b) {
+        b = document.createElement('div')
+        b.id = 'pm-login-banner'
+        b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;color:#fff;padding:16px 24px;font-family:Segoe UI,sans-serif;display:flex;align-items:center;gap:14px;box-shadow:0 2px 20px rgba(0,0,0,.35);transition:background .3s'
+        document.body.insertBefore(b, document.body.firstChild)
+        document.body.style.paddingTop = '120px'
+      }
+      if (isInChannel && !b.classList.contains('pm-success')) {
+        // LOGADO — banner verde GIGANTE pulsando
+        b.classList.add('pm-success')
+        b.style.background = GREEN
+        b.style.padding = '20px 30px'
+        b.innerHTML = '<span style="font-size:42px">✅</span><div style="flex:1"><strong style="font-size:22px;display:block">LOGIN CAPTURADO!</strong><span style="font-size:16px;font-weight:600;display:block;margin-top:4px">⚠️ FECHE ESTA JANELA AGORA (X no canto superior direito) pra o app finalizar o cadastro. Sem fechar, NÃO PUBLICA.</span></div>'
+        document.body.style.paddingTop = '160px'
+      } else if (!isInChannel) {
+        // Esperando login — banner roxo
+        b.classList.remove('pm-success')
+        b.style.background = PURPLE
+        b.innerHTML = '<span style="font-size:22px">📺</span><div style="flex:1"><strong style="font-size:14px">PostMaster: Login YouTube</strong><br><span style="opacity:.95;font-size:12px">1) Faça login com sua conta Google.<br>2) Se tem MAIS DE UM CANAL, troque pelo menu da foto de perfil e escolha o certo.<br>3) Quando estiver no canal certo, <strong>FECHE ESTA JANELA</strong>.</span></div>'
+      }
     }
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', showBanner)
+      document.addEventListener('DOMContentLoaded', updateBanner)
     } else {
-      showBanner()
+      updateBanner()
     }
-    // Reinjeta a cada 1s pq YouTube re-renderiza
-    setInterval(showBanner, 1500)
+    setInterval(updateBanner, 1000)
   })
 
   await page.goto('https://studio.youtube.com/', { waitUntil: 'domcontentloaded', timeout: 60000 })
