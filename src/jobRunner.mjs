@@ -362,11 +362,11 @@ export default async function jobRunner(job, dataDir, log) {
   // ── YOUTUBE: pipeline especifico (16:9, dublagem opcional, corte denso) ──────
   let ytMeta = null
   if (job.platform === 'youtube') {
-    const ytMode = job.ytMode || 'original' // 'original' | 'corteDenso' | 'dublado' | 'corteDensoDublado'
+    const ytMode = job.ytMode || 'original' // 'original' | 'corteDenso' | 'dublado' | 'corteDensoDublado' | 'narrado' | 'corteDensoNarrado'
     log(`🎬 YouTube modo: ${ytMode}`)
 
     // 1. Corte denso (pega 8-12min de video longo)
-    if (ytMode === 'corteDenso' || ytMode === 'corteDensoDublado') {
+    if (ytMode === 'corteDenso' || ytMode === 'corteDensoDublado' || ytMode === 'corteDensoNarrado') {
       try {
         const { ranges } = await selecionarTrechosDensos({ videoPath, targetMin: job.ytTargetMin || 10, log })
         const cortado = videoPath.replace('.mp4', '_denso.mp4')
@@ -380,20 +380,24 @@ export default async function jobRunner(job, dataDir, log) {
       } catch (e) { log(`⚠️ Corte denso falhou: ${e.message.slice(0,80)} - seguindo com video inteiro`) }
     }
 
-    // 2. Dublagem PT-BR (Whisper + Qwen + Piper TTS)
-    if (ytMode === 'dublado' || ytMode === 'corteDensoDublado') {
+    // 2. Dublagem PT-BR ou Narracao IA (mesmo pipeline, narracao pula traducao)
+    const isNarracao = (ytMode === 'narrado' || ytMode === 'corteDensoNarrado')
+    const isDublagem = (ytMode === 'dublado' || ytMode === 'corteDensoDublado')
+    if (isDublagem || isNarracao) {
       try {
-        const dublado = videoPath.replace('.mp4', '_dublado.mp4')
+        const suffix = isNarracao ? '_narrado.mp4' : '_dublado.mp4'
+        const saida = videoPath.replace('.mp4', suffix)
         await dublarVideo({
-          videoPath, outputPath: dublado,
+          videoPath, outputPath: saida,
           voice: job.ytVoz || 'homem',
           queimarLegenda: !!job.ytLegenda,
-          langOrigem: job.ytLangOrigem || 'auto',
+          langOrigem: isNarracao ? 'pt' : (job.ytLangOrigem || 'auto'),
+          modoNarracao: isNarracao,
           log,
         })
         try { fs.unlinkSync(videoPath) } catch {}
-        videoPath = dublado
-      } catch (e) { log(`⚠️ Dublagem falhou: ${e.message.slice(0,100)} - postando com audio original`) }
+        videoPath = saida
+      } catch (e) { log(`⚠️ ${isNarracao ? 'Narracao' : 'Dublagem'} falhou: ${e.message.slice(0,100)} - postando com audio original`) }
     }
 
     // 3. Auto-edit 16:9 final (sempre roda — corte bordas + watermark)
@@ -406,7 +410,7 @@ export default async function jobRunner(job, dataDir, log) {
         await applyAutoEdit16x9({
           videoPath, outputPath: editado,
           cutSilence: (ytMode === 'original'),
-          trimEdgePercent: ytMode === 'dublado' ? 0 : 5,
+          trimEdgePercent: (isDublagem || isNarracao) ? 0 : 5,
           watermarkText: job.watermarkType === 'text' ? job.watermarkText : '',
           log,
         })

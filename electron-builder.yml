@@ -59,13 +59,26 @@ extraResources:
   # v1.0.31 ate v1.0.34, clientes nao conseguiam baixar de YT desde a recuperacao.
   - from: "bin/deno.exe"
     to: "bin/deno.exe"
-  # YouTube poster (v1.0.57+): pipeline de dublagem PT-BR local
-  # — Whisper.cpp transcreve, Qwen traduz (modelo ja em models/), Piper TTS gera narracao.
-  # Os 4 itens abaixo sao opcionais — feature so vira ativa quando todos presentes.
+  # v1.1.8: Pipeline de dublagem PT-BR local — Whisper.cpp + Piper TTS + Qwen (traducao)
+  # bin/ inteiro: whisper-cli.exe + DLLs (ggml, blas, openblas etc) + ggml-base.bin + piper/
   - from: "bin/whisper-cli.exe"
     to: "bin/whisper-cli.exe"
-  - from: "bin/ggml-small.bin"
-    to: "bin/ggml-small.bin"
+  - from: "bin/ggml-base.bin"
+    to: "bin/ggml-base.bin"
+  - from: "bin/ggml.dll"
+    to: "bin/ggml.dll"
+  - from: "bin/ggml-base.dll"
+    to: "bin/ggml-base.dll"
+  - from: "bin/ggml-blas.dll"
+    to: "bin/ggml-blas.dll"
+  - from: "bin/ggml-cpu.dll"
+    to: "bin/ggml-cpu.dll"
+  - from: "bin/libopenblas.dll"
+    to: "bin/libopenblas.dll"
+  - from: "bin/SDL2.dll"
+    to: "bin/SDL2.dll"
+  - from: "bin/whisper.dll"
+    to: "bin/whisper.dll"
   - from: "bin/piper"
     to: "bin/piper"
   # Modelo de face (fase 2). main.js copia daqui pra userData no boot.

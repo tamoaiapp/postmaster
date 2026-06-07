@@ -9,7 +9,8 @@ param(
     [string]$Description = "",
     [string]$Visibility = "private",
     [switch]$KidsContent = $false,
-    [string]$ChannelId = ""
+    [string]$ChannelId = "",
+    [switch]$DryRun = $false
 )
 
 Add-Type -AssemblyName UIAutomationClient
@@ -451,7 +452,14 @@ if ($visRadio) {
     List-UIA-Elements "RadioButton"
 }
 
-# === STEP 10: Publicar (filtro Y>200 pra evitar pegar nome Publicar em outro elemento) ===
+# === STEP 10: Publicar (ou skip se -DryRun) ===
+if ($DryRun) {
+    Write-Host "[10] DRY RUN - NAO clicando Publicar. Video fica como RASCUNHO pra inspecao."
+    Write-Host "  Modo dry-run: deixa video upload + detalhes preenchidos, mas nao confirma publish."
+    Snap "11-dryrun-rascunho"
+    Write-Host "  RASCUNHO_SALVO"
+    return
+}
 Write-Host "[10] Clicando Publicar..."
 Start-Sleep -Milliseconds 1500
 $publicar = Find-UIA-Like-InBounds "publicar" "Button" 200 9999 8000

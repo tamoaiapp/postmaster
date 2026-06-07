@@ -4,10 +4,11 @@
  */
 import { aiManager } from '../aiManager.mjs'
 
-const CHUNK_CHARS = 600
-
 /**
- * @param {Array<{start,end,text}>} segments - saida do whisper
+ * v1.1.8: traduz SEGMENTO POR SEGMENTO (sem chunk com pipes que quebra alinhamento)
+ * + prompt que forca PT-BR e bloqueia palavras em ingles
+ * + heuristica que detecta resposta-suja (eco do original, ingles cru)
+ * @param {Array<{start,end,text}>} segments
  * @param {Object} [opts]
  * @param {function} [opts.log]
  * @returns {Promise<Array<{start,end,text,textPtBr}>>}
@@ -19,38 +20,64 @@ export async function traduzirSegmentos(segments, { log = () => {} } = {}) {
     return segments.map(s => ({ ...s, textPtBr: s.text }))
   }
 
-  // Agrupa segmentos em chunks pra economizar LLM calls
   const out = []
-  let i = 0
-  while (i < segments.length) {
-    let chunk = ''
-    const startIdx = i
-    while (i < segments.length && chunk.length + segments[i].text.length < CHUNK_CHARS) {
-      chunk += (chunk ? ' | ' : '') + segments[i].text
-      i++
-    }
-    if (chunk.length === 0) { i++; continue }
+  let lastProgress = 0
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]
+    const original = (seg.text || '').trim()
+    if (!original) { out.push({ ...seg, textPtBr: '' }); continue }
 
-    const prompt = `Traduza pra portugues brasileiro coloquial natural. Mantenha o ritmo. Responda APENAS a traducao, sem comentarios:
+    const prompt = `Voce e um tradutor. Traduza pra portugues brasileiro coloquial.
+REGRAS:
+- Responda APENAS a traducao em portugues.
+- NAO deixe palavras em ingles.
+- NAO repita o original.
+- NAO adicione comentarios, aspas ou explicacoes.
+- Mantenha tamanho similar ao original.
 
-ORIGINAL: ${chunk}
+INGLES: "${original}"
+PORTUGUES:`
 
-TRADUCAO PT-BR:`
-
-    let translated = chunk
+    let translated = ''
     try {
-      translated = (await llm.complete(prompt, { maxTokens: 600, temperature: 0.3 }))
-        .replace(/^TRADUCAO[^:]*:\s*/i, '').trim()
+      const raw = await llm.complete(prompt, { maxTokens: 120, temperature: 0.2 })
+      translated = sanitize(raw)
     } catch (e) {
-      log(`⚠️ Erro tradutor: ${e.message.slice(0,60)} - usando original`)
+      log(`⚠️ Erro tradutor seg ${i}: ${e.message.slice(0,40)}`)
     }
 
-    // Re-distribui traducao nos segmentos originais proporcionalmente
-    const parts = translated.split(/\s*\|\s*/)
-    for (let k = startIdx; k < i; k++) {
-      const j = k - startIdx
-      out.push({ ...segments[k], textPtBr: (parts[j] || segments[k].text).trim() })
+    // Heuristica: se a traducao saiu igual ao original ou tem muito ingles, mantemos a melhor versao
+    if (!translated || isMostlyEnglish(translated) || translated.toLowerCase() === original.toLowerCase()) {
+      translated = translated || original
+    }
+    out.push({ ...seg, textPtBr: translated })
+
+    // Progresso a cada 10%
+    const pct = Math.floor((i + 1) / segments.length * 10)
+    if (pct > lastProgress) {
+      log(`   📝 traduzindo ${i + 1}/${segments.length}`)
+      lastProgress = pct
     }
   }
   return out
+}
+
+function sanitize(raw) {
+  let t = String(raw || '').trim()
+  // Remove prefixos comuns
+  t = t.replace(/^(PORTUGUES|TRADUCAO|RESPOSTA|PT-?BR)[^:]*:\s*/i, '')
+  // Remove aspas no inicio/fim
+  t = t.replace(/^["'`]+|["'`]+$/g, '')
+  // So pega a primeira linha (Qwen as vezes tagarela)
+  t = t.split(/\n/)[0].trim()
+  return t
+}
+
+function isMostlyEnglish(s) {
+  // Sem acentos + sem palavras tipicas PT-BR + tem palavras tipicas EN
+  const lower = s.toLowerCase()
+  if (/[áàâãéêíóôõúç]/i.test(s)) return false
+  if (/\b(o|a|os|as|de|da|do|que|nao|sim|com|para|por|um|uma|voce|esta|este|isso|sou|sao|tem)\b/.test(lower)) return false
+  if (/\b(the|and|you|are|is|was|were|that|this|with|for|have|has|will|would|could|should|been|but|not|they|them)\b/.test(lower)) return true
+  return false
 }

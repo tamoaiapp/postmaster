@@ -34,10 +34,14 @@ Thumbs.db
 # Outputs do PostMaster userData (não devem estar no repo)
 postmaster-data/
 
-# Binarios externos baixados no build (deno.exe excede 100MB do GitHub).
-# O workflow .github/workflows/release.yml baixa antes do electron-builder.
-bin/deno.exe
-bin/yt-dlp.exe
+# Binarios externos baixados no build (todos via CI release.yml).
+# Inclui deno.exe (122MB), yt-dlp.exe, whisper-cli + DLLs + ggml-*.bin (~300MB),
+# piper.exe + vozes pt_BR-faber/cadu-medium (~190MB).
+bin/*
+!bin/.gitkeep
+
+# Scripts locais de teste (nao publicar)
+test-*.mjs
 
 # Scripts privados não-versionados
 scripts/_*

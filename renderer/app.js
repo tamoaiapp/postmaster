@@ -1104,20 +1104,22 @@ function getWizardBody(step) {
           <select onchange="wizardData.ytMode=this.value;renderWizardStep()">
             <option value="original" ${wizardData.ytMode==='original'?'selected':''}>📼 Original — só re-encoda 16:9 + watermark (rápido)</option>
             <option value="corteDenso" ${wizardData.ytMode==='corteDenso'?'selected':''}>✂️ Corte inteligente — pega 8-12min de vídeo longo</option>
-            <option value="dublado" ${wizardData.ytMode==='dublado'?'selected':''}>🎤 Dublado PT-BR — Whisper + Qwen + Piper TTS local</option>
+            <option value="dublado" ${wizardData.ytMode==='dublado'?'selected':''}>🎤 Dublado PT-BR (vídeo em outro idioma) — Whisper + Qwen + Piper TTS</option>
             <option value="corteDensoDublado" ${wizardData.ytMode==='corteDensoDublado'?'selected':''}>✂️🎤 Corte + Dublado (mais lento)</option>
+            <option value="narrado" ${wizardData.ytMode==='narrado'?'selected':''}>🗣️ Narrado por IA (vídeo já em PT-BR) — re-narra com voz IA</option>
+            <option value="corteDensoNarrado" ${wizardData.ytMode==='corteDensoNarrado'?'selected':''}>✂️🗣️ Corte + Narrado por IA</option>
           </select>
-          <span class="text-sm text-muted">Tempo: original ~3min · corte ~8min · dublado ~25min · combo ~35min (vídeo de 15min)</span>
+          <span class="text-sm text-muted">Tempo: original ~3min · corte ~8min · dublado/narrado ~25min · combo ~35min (vídeo de 15min)</span>
         </div>
 
-        ${wizardData.ytMode === 'corteDenso' || wizardData.ytMode === 'corteDensoDublado' ? `
+        ${['corteDenso','corteDensoDublado','corteDensoNarrado'].includes(wizardData.ytMode) ? `
           <div class="form-group">
             <label>Duração alvo do corte (min)</label>
             <input type="number" min="3" max="20" value="${wizardData.ytTargetMin || 10}" onchange="wizardData.ytTargetMin=parseInt(this.value)||10">
           </div>
         ` : ''}
 
-        ${wizardData.ytMode === 'dublado' || wizardData.ytMode === 'corteDensoDublado' ? `
+        ${['dublado','corteDensoDublado','narrado','corteDensoNarrado'].includes(wizardData.ytMode) ? `
           <div class="form-group">
             <label>Voz da narração</label>
             <div style="display:flex;gap:8px">
@@ -1131,6 +1133,7 @@ function getWizardBody(step) {
               </label>
             </div>
           </div>
+          ${['dublado','corteDensoDublado'].includes(wizardData.ytMode) ? `
           <div class="form-group">
             <label>Idioma do vídeo original</label>
             <select onchange="wizardData.ytLangOrigem=this.value">
@@ -1139,9 +1142,9 @@ function getWizardBody(step) {
               <option value="es" ${wizardData.ytLangOrigem==='es'?'selected':''}>🇪🇸 Espanhol</option>
               <option value="ja" ${wizardData.ytLangOrigem==='ja'?'selected':''}>🇯🇵 Japonês</option>
               <option value="ko" ${wizardData.ytLangOrigem==='ko'?'selected':''}>🇰🇷 Coreano</option>
-              <option value="pt" ${wizardData.ytLangOrigem==='pt'?'selected':''}>🇧🇷 Português (re-narração)</option>
             </select>
           </div>
+          ` : ''}
           <div class="form-group">
             <label class="form-check">
               <input type="checkbox" ${wizardData.ytLegenda?'checked':''} onchange="wizardData.ytLegenda=this.checked">

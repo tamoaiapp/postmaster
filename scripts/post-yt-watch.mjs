@@ -31,7 +31,7 @@ const log = (m) => console.log(`[${new Date().toLocaleTimeString()}] ${m}`)
 
 try {
   const ok = await postVideoYouTube({
-    account: 'fute vai youtube',
+    account: process.argv[2] || 'teste',
     videoPath,
     title: `TESTE LOCAL ${new Date().toISOString().slice(0,16)}`,
     description: 'Teste de upload pelo PostMaster — script local.',

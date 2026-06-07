@@ -170,17 +170,22 @@ export async function baixarVideoYoutube(video, downloadsDir, prefix, log, dataD
   const out = path.join(downloadsDir, `${prefix}_${ts}.%(ext)s`)
   const ffmpegDir  = path.dirname(ffmpegStatic)
 
-  // Range de corte: pode ser custom (smart cut) ou padrao (0-60s)
-  const startSec = cutRange?.start ?? 0
-  const endSec = cutRange?.end ?? 60
-  const startStr = `${Math.floor(startSec/60)}:${String(startSec%60).padStart(2,'0')}`
-  const endStr = `${Math.floor(endSec/60)}:${String(endSec%60).padStart(2,'0')}`
-  const downloadSection = `*${startStr}-${endStr}`
-
-  log(`⬇️ Baixando ${startStr}–${endStr}...`)
+  // v1.1.8: se cutRange eh null/undefined = VIDEO INTEIRO (nao limita ao default 60s).
+  // Antes default era 0-60s mesmo pra cutType=full -> baixava so 60s -> impossivel ter 8-16min YT.
+  let sectionArg = ''
+  if (cutRange && (cutRange.start !== undefined || cutRange.end !== undefined)) {
+    const startSec = cutRange.start ?? 0
+    const endSec = cutRange.end ?? 60
+    const startStr = `${Math.floor(startSec/60)}:${String(startSec%60).padStart(2,'0')}`
+    const endStr = `${Math.floor(endSec/60)}:${String(endSec%60).padStart(2,'0')}`
+    sectionArg = `--download-sections "*${startStr}-${endStr}"`
+    log(`⬇️ Baixando ${startStr}–${endStr}...`)
+  } else {
+    log(`⬇️ Baixando VIDEO INTEIRO (sem range)...`)
+  }
   await execAsync(
-    `${YTDLP} ${JS_RUNTIMES_ARG} ${await getYoutubeCookiesArg(log, dataDir)} --ffmpeg-location "${ffmpegDir}" --download-sections "${downloadSection}" -f "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 -o "${out}" "https://www.youtube.com/watch?v=${video.id}"`,
-    { timeout: 180000, windowsHide: true }
+    `${YTDLP} ${JS_RUNTIMES_ARG} ${await getYoutubeCookiesArg(log, dataDir)} --ffmpeg-location "${ffmpegDir}" ${sectionArg} -f "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 -o "${out}" "https://www.youtube.com/watch?v=${video.id}"`,
+    { timeout: 600000, windowsHide: true }
   )
 
   const files = fs.readdirSync(downloadsDir)
