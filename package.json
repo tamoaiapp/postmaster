@@ -1,6 +1,6 @@
 {
     "name":  "postmaster",
-    "version":  "1.1.0",
+    "version":  "1.1.1",
     "description":  "Automação de postagem com IA local",
     "main":  "main.js",
     "scripts":  {
@@ -14,8 +14,7 @@
                          "node-llama-cpp":  "^3.18.1",
                          "onnxruntime-node":  "^1.26.0",
                          "playwright":  "^1.44.0",
-                         "sharp":  "^0.33.4",
-                         "tesseract.js":  "^7.0.0"
+                         "sharp":  "^0.33.4"
                      },
     "devDependencies":  {
                             "electron":  "^32.0.0",
