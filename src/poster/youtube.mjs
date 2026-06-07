@@ -181,18 +181,42 @@ async function clickViaWin32({ page, locator, log }) {
   const screenX = Math.round((target.sx + sideBorder + target.centerX) * dpr)
   const screenY = Math.round((target.sy + topChrome + target.centerY) * dpr)
   log?.(`   🖱️ Win32 click (${screenX}, ${screenY}) — "${target.text}" vp(${Math.round(target.centerX)},${Math.round(target.centerY)}) topChrome=${topChrome} dpr=${dpr}`)
+  // v1.0.87: movimento progressivo natural ate o botao + hover 600ms antes do click.
+  // YT detecta cursor "teleportando" como bot — humano move mouse, hover, depois clica.
+  // Comeca de coord random na tela, faz 8 steps de approach com easing, hover, click.
+  const startX = 200 + Math.floor(Math.random() * 400)
+  const startY = 200 + Math.floor(Math.random() * 300)
   const { spawn } = await import('child_process')
   await new Promise((resolve, reject) => {
     const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `
       Add-Type @"
       using System;
       using System.Runtime.InteropServices;
-      public class W { [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y); [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, uint e); }
+      public class W {
+        [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
+        [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, uint e);
+      }
 "@
-      [W]::SetCursorPos(${screenX}, ${screenY})
-      Start-Sleep -Milliseconds 150
+      # Comeca em posicao random e move progressivamente ate o botao (8 steps com easing)
+      $sx = ${startX}; $sy = ${startY}
+      $tx = ${screenX}; $ty = ${screenY}
+      [W]::SetCursorPos($sx, $sy)
+      Start-Sleep -Milliseconds 100
+      for ($i = 1; $i -le 8; $i++) {
+        $t = $i / 8.0
+        # easeInOutQuad
+        $e = if ($t -lt 0.5) { 2 * $t * $t } else { 1 - [math]::Pow(-2 * $t + 2, 2) / 2 }
+        $cx = [int]($sx + ($tx - $sx) * $e + (Get-Random -Min -2 -Max 3))
+        $cy = [int]($sy + ($ty - $sy) * $e + (Get-Random -Min -2 -Max 3))
+        [W]::SetCursorPos($cx, $cy)
+        Start-Sleep -Milliseconds (40 + (Get-Random -Min 0 -Max 30))
+      }
+      # Hover em cima do botao
+      [W]::SetCursorPos($tx, $ty)
+      Start-Sleep -Milliseconds (500 + (Get-Random -Min 0 -Max 300))
+      # Click humanizado (mousedown + 60-100ms hold + mouseup)
       [W]::mouse_event(2, 0, 0, 0, 0)
-      Start-Sleep -Milliseconds 90
+      Start-Sleep -Milliseconds (60 + (Get-Random -Min 0 -Max 50))
       [W]::mouse_event(4, 0, 0, 0, 0)
     `])
     ps.on('exit', code => code === 0 ? resolve() : reject(new Error('PS exit ' + code)))
