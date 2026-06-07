@@ -211,7 +211,7 @@ Snap "02-after-criar"
 # Sucesso = popup com "Selecionar arquivos" aparece.
 Write-Host "[4] Loop pra abrir 'Enviar videos' (3 estrategias)..."
 
-$strategies = @('win32-click', 'uia-invoke', 'down-enter')
+$strategies = @('uia-invoke', 'win32-click', 'down-enter')  # UIA Invoke primeiro (funciona em React menu items)
 $popupBtn = $null
 foreach ($strat in $strategies) {
     Write-Host "  tentando estrategia: $strat"
