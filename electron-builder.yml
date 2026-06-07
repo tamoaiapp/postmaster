@@ -30,6 +30,8 @@ asarUnpack:
   - "node_modules/@img/**/*"
   - "node_modules/ffmpeg-static/**/*"
   - "models/**/*"
+  # PS scripts pro upload YT via Win32+UIA (PowerShell nao executa de dentro do asar)
+  - "src/winControl/**/*"
 
 # Recursos externos copiados pra resources/ (acessíveis via process.resourcesPath)
 extraResources:
