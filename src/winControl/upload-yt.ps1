@@ -8,7 +8,8 @@ param(
     [Parameter(Mandatory=$true)] [string]$Title,
     [string]$Description = "",
     [string]$Visibility = "private",
-    [switch]$KidsContent = $false
+    [switch]$KidsContent = $false,
+    [string]$ChannelId = ""
 )
 
 Add-Type -AssemblyName UIAutomationClient
@@ -165,7 +166,9 @@ Write-Host "  video: $videoFull"
 
 $chrome = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
 if (-not (Test-Path $chrome)) { $chrome = "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe" }
-Start-Process -FilePath $chrome -ArgumentList "--new-window", "--start-maximized", "https://studio.youtube.com/"
+$studioUrl = if ($ChannelId -match '^UC[\w-]+$') { "https://studio.youtube.com/channel/$ChannelId/" } else { "https://studio.youtube.com/" }
+Write-Host "  abrindo: $studioUrl"
+Start-Process -FilePath $chrome -ArgumentList "--new-window", "--start-maximized", $studioUrl
 Write-Host "  aguardando 20s pra carregar (Studio React eh lento)..."
 Start-Sleep -Seconds 20
 

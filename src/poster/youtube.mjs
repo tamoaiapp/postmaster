@@ -52,7 +52,7 @@ export async function postVideoYouTube(opts) {
   const {
     videoPath, title, description = '', tags = [],
     visibility = 'private', category = 'Entretenimento', madeForKids = false,
-    log, jobId, account,
+    log, jobId, account, dataDir,
   } = opts
 
   if (!fs.existsSync(videoPath)) throw new Error(`Video nao encontrado: ${videoPath}`)
@@ -62,12 +62,27 @@ export async function postVideoYouTube(opts) {
   const psScript = path.join(scriptDir, 'upload-yt.ps1')
   if (!fs.existsSync(psScript)) throw new Error(`Script PS nao encontrado: ${psScript}`)
 
+  // v1.1.2: le channelId salvo na conta pra forcar URL /channel/UCxxx/ - assim
+  // independe de qual canal esta logado por padrao no Chrome do user
+  let channelId = ''
+  if (account && dataDir) {
+    const chFile = path.join(dataDir, 'sessions', `yt-${account}.channelId`)
+    try {
+      if (fs.existsSync(chFile)) {
+        const ch = fs.readFileSync(chFile, 'utf-8').trim()
+        if (/^UC[\w-]+$/.test(ch)) channelId = ch
+      }
+    } catch {}
+  }
+
   const liveJobId = jobId || `${account || 'yt'}-${Date.now()}`
   liveView.register(liveJobId, null, { account, platform: 'youtube', status: 'iniciando' })
 
   log(`🎬 Upload YouTube via Chrome real + Win32 + UIA`)
   log(`   video: ${path.basename(videoPath)} (${Math.round(fs.statSync(videoPath).size / 1024 / 1024)}MB)`)
   log(`   titulo: ${title}`)
+  if (channelId) log(`   canal forcado: ${channelId}`)
+  else log(`   ⚠️ channelId nao achado pra conta '${account}' - usa o canal logado por padrao no Chrome`)
 
   const args = [
     '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
@@ -78,6 +93,7 @@ export async function postVideoYouTube(opts) {
     '-Visibility', visibility,
   ]
   if (madeForKids) args.push('-KidsContent')
+  if (channelId) { args.push('-ChannelId'); args.push(channelId) }
 
   return new Promise((resolve, reject) => {
     const ps = spawn('powershell.exe', args, { windowsHide: false })
