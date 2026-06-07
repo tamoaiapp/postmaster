@@ -520,29 +520,55 @@ async function postVideoYouTubeInternal({
       })
       if (state.hasIdentityModal) {
         modalAvancarTries++
-        if (modalAvancarTries <= 3) {
-          // v1.0.83: usa Win32 SetCursorPos+mouse_event pra clicar REAL no Avancar
-          // (isTrusted=true). Anti-bot YT verifica isTrusted no click pra
-          // disabilitar botao. Click via Win32 = click humano = passa.
-          log(`🔓 Modal identidade detectado — tentando Win32 click (tentativa ${modalAvancarTries}/3)`)
+        if (modalAvancarTries === 1) {
+          // v1.0.88: 1 Win32 click pra disparar popup de verify, depois AGUARDA 15min
+          // pro user fazer SMS/email no popup. NAO fecha nada — janela fica aberta.
+          // Quando modal sumir (user terminou), continua upload de onde parou.
+          log(`🔓 Modal identidade detectado — vou clicar Avancar 1x (Win32) e AGUARDAR voce verificar`)
+          log(`👉 Quando aparecer popup do Google pra SMS/email — COMPLETE A VERIFICACAO`)
+          log(`   A janela vai ficar aberta por ate 15min. Nao fecha nada — eu retomo sozinho`)
           const avancarLoc = page.locator('button, [role="button"]').filter({ hasText: /^(Avançar|Avancar|Next|Continuar|Continue)$/i }).first()
           if (await avancarLoc.count() > 0) {
             try {
               await avancarLoc.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {})
               await delay(400 + Math.floor(Math.random() * 400))
               await clickViaWin32({ page, locator: avancarLoc, log })
-              await snap(`05a-win32-click-${modalAvancarTries}`)
-              await delay(3000)
+              await snap('05a-win32-click-then-wait')
+              await delay(2000)
+              // Aguarda modal sumir por ate 15min (tempo pro user fazer SMS)
+              const verifyStart = Date.now()
+              const MAX_VERIFY_MS = 15 * 60 * 1000
+              while (Date.now() - verifyStart < MAX_VERIFY_MS) {
+                const stillThere = await page.evaluate(() => {
+                  const t = (document.body.innerText || '').toLowerCase()
+                  return /confirme sua identidade|verify your identity/.test(t)
+                }).catch(() => false)
+                if (!stillThere) {
+                  log(`✅ Modal fechado pelo user — continuando upload`)
+                  await snap('05c-identity-passed')
+                  break
+                }
+                // Loga progresso a cada 30s
+                const elapsed = Math.floor((Date.now() - verifyStart) / 1000)
+                if (elapsed % 30 < 5) log(`   ⏳ aguardando verificacao... (${elapsed}s/${Math.floor(MAX_VERIFY_MS/1000)}s)`)
+                await delay(3000)
+              }
+              const finalCheck = await page.evaluate(() => {
+                const t = (document.body.innerText || '').toLowerCase()
+                return /confirme sua identidade|verify your identity/.test(t)
+              }).catch(() => true)
+              if (finalCheck) {
+                log(`⚠️ Modal ainda presente apos 15min — abortando`)
+                await snap('05d-identity-final-timeout')
+                throw new Error('yt_identity_verify_timeout: user nao completou verificacao em 15min')
+              }
             } catch (e) {
+              if (e.message?.includes('yt_identity_verify_timeout')) throw e
               log(`   warning: Win32 click falhou: ${e.message.split('\n')[0].slice(0,80)}`)
             }
           } else {
-            log(`   warning: botao Avancar nao encontrado no DOM (modal sem texto reconhecido)`)
+            log(`   warning: botao Avancar nao encontrado no DOM`)
           }
-        } else if (modalAvancarTries === 4) {
-          log(`⚠️ Modal persistiu apos 3 Win32 clicks — abortando`)
-          await snap('05b-identity-stuck-after-win32')
-          throw new Error('yt_identity_win32_failed: modal nao fechou apos 3 cliques Win32 reais')
         }
       }
       if (state.ready) { ready = true; break }
