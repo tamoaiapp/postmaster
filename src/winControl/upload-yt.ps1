@@ -429,9 +429,24 @@ $publicar = Find-UIA-Like-InBounds "publicar" "Button" 200 9999 8000
 if (-not $publicar) { $publicar = Find-UIA-Like-InBounds "salvar" "Button" 200 9999 3000 }
 if ($publicar) {
     Write-Host "  achei: '$($publicar.Current.Name)'"
-    Click-UIA $publicar "Publicar"
+    # UIA Invoke primeiro (React listener), fallback Win32
+    $invokePat = $null
+    if ($publicar.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invokePat)) {
+        Write-Host "  publicando via UIA Invoke"
+        $invokePat.Invoke()
+    } else {
+        Click-UIA $publicar "Publicar"
+    }
     Start-Sleep -Seconds 6
     Snap "11-after-publish"
+    # Verifica se dialog fechou (rascunho seria status mudado pra fora de Visibilidade)
+    $stillOpen = Find-UIA-Like "Visibilidade" "" 2000
+    if ($stillOpen) {
+        Write-Host "  AVISO: dialog ainda aberto - retry com Win32 click"
+        Click-UIA $publicar "Publicar (retry Win32)"
+        Start-Sleep -Seconds 5
+        Snap "11b-after-retry"
+    }
     Write-Host "  PUBLICADO!"
 } else {
     Write-Host "  AVISO: Publicar nao achado. Buttons:"
