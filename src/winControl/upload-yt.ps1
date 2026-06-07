@@ -367,22 +367,51 @@ if ($naoKids) {
 
 # === STEP 8: Avancar 3x (filtra por Y > 200 pra evitar Avancar do navegador) ===
 Write-Host "[8] Clicando Avancar 3 vezes ate visibilidade (Y>200 - filtra Chrome nav)..."
-for ($i = 1; $i -le 3; $i++) {
+# v1.1.7: loop dinamico ate Visibilidade (canais monetizados tem 5 abas, nao 4).
+# Detecta tela Visibilidade pelo radio "Privado" ou "Salvar ou publicar" presente.
+$maxAvancar = 6  # safety: canais com monetizacao+verificacoes podem ter ate ~5 telas
+for ($i = 1; $i -le $maxAvancar; $i++) {
     Start-Sleep -Milliseconds 2000
+    # Checa se ja chegou em Visibilidade (radio "Privado" visivel)
+    $visRadio = Find-UIA-Like "Privado" "RadioButton" 1500
+    if ($visRadio) {
+        Write-Host "  Visibilidade alcancada apos $($i-1) Avancar(es)"
+        break
+    }
     $avancar = Find-UIA-Like-InBounds "avancar" "Button" 200 9999 5000
     if (-not $avancar) {
-        Write-Host "  Avancar #$i nao achado em Y>200 - parando"
+        Write-Host "  Avancar #$i nao achado - parando"
         break
     }
     $r = $avancar.Current.BoundingRectangle
+    # Checa se Avancar esta enabled
+    $isEnabled = $true
+    try { $isEnabled = $avancar.Current.IsEnabled } catch {}
+    if (-not $isEnabled) {
+        Write-Host "  Avancar #$i DISABLED (pode ser tela Monetizacao pendente) - tentando pular..."
+        # Procura botoes alternativos: "Pular", "Mais tarde", "Sem monetizacao"
+        $skip = Find-UIA-Like "Pular" "Button" 1500
+        if (-not $skip) { $skip = Find-UIA-Like "Mais tarde" "Button" 1500 }
+        if (-not $skip) { $skip = Find-UIA-Like "Sem monetizacao" "RadioButton" 1500 }
+        if ($skip) {
+            Write-Host "  achei alternativa: '$($skip.Current.Name)' - clicando"
+            $sInv = $null
+            if ($skip.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$sInv)) { $sInv.Invoke() } else { Click-UIA $skip "skip" }
+            Start-Sleep -Milliseconds 2000
+            continue
+        } else {
+            Write-Host "  sem alternativa - parando (canal exige config manual)"
+            Snap "09-disabled-avancar-$i"
+            break
+        }
+    }
     Write-Host "  Avancar #$i em rect=($([int]$r.Left),$([int]$r.Top))-($([int]$r.Right),$([int]$r.Bottom))"
-    # Tenta UIA Invoke primeiro (mais robusto pra React listener), fallback Win32 click
     $invokePat = $null
     if ($avancar.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invokePat)) {
         Write-Host "  Avancar #$i via UIA Invoke"
         $invokePat.Invoke()
     } else {
-        Click-UIA $avancar "Avancar #$i (dialog Win32)"
+        Click-UIA $avancar "Avancar #$i (Win32)"
     }
     Start-Sleep -Milliseconds 2500
     Snap "09-after-avancar-$i"
