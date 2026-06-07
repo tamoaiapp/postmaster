@@ -114,3 +114,4 @@ function Invoke-HumanClick([int]$tx, [int]$ty) {
     Start-Sleep -Milliseconds (55 + (Get-Random -Min 0 -Max 50))
     [W32]::mouse_event([W32]::MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
 }
+# v1.1.7 - Win32+UIA YT poster
