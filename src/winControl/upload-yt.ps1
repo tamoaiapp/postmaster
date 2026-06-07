@@ -368,7 +368,7 @@ if ($naoKids) {
 # === STEP 8: Avancar 3x (filtra por Y > 200 pra evitar Avancar do navegador) ===
 Write-Host "[8] Clicando Avancar 3 vezes ate visibilidade (Y>200 - filtra Chrome nav)..."
 for ($i = 1; $i -le 3; $i++) {
-    Start-Sleep -Milliseconds 1500
+    Start-Sleep -Milliseconds 2000
     $avancar = Find-UIA-Like-InBounds "avancar" "Button" 200 9999 5000
     if (-not $avancar) {
         Write-Host "  Avancar #$i nao achado em Y>200 - parando"
@@ -376,8 +376,15 @@ for ($i = 1; $i -le 3; $i++) {
     }
     $r = $avancar.Current.BoundingRectangle
     Write-Host "  Avancar #$i em rect=($([int]$r.Left),$([int]$r.Top))-($([int]$r.Right),$([int]$r.Bottom))"
-    Click-UIA $avancar "Avancar #$i (dialog)"
-    Start-Sleep -Milliseconds 2000
+    # Tenta UIA Invoke primeiro (mais robusto pra React listener), fallback Win32 click
+    $invokePat = $null
+    if ($avancar.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invokePat)) {
+        Write-Host "  Avancar #$i via UIA Invoke"
+        $invokePat.Invoke()
+    } else {
+        Click-UIA $avancar "Avancar #$i (dialog Win32)"
+    }
+    Start-Sleep -Milliseconds 2500
     Snap "09-after-avancar-$i"
 }
 
