@@ -69,6 +69,27 @@ PT:`
 function sanitize(raw, original) {
   let t = String(raw || '').trim()
 
+  // v1.3.2: Qwen as vezes inicia com frase explicativa que vaza pro TTS.
+  // Ex: "Aqui está a tradução em português brasileiro: <texto>"
+  // Ou: "Eis a tradução: <texto>"
+  // Ou: "Tradução: <texto>"
+  // Strip o prefixo inteiro ate o primeiro ":" ou ate uma quebra de linha.
+  const explicacoes = [
+    /^aqui (est[áa]|vai|tem)[^:.]*[:.]?\s*/i,
+    /^eis (a|o)[^:.]*[:.]?\s*/i,
+    /^segue[^:.]*[:.]?\s*/i,
+    /^a (tradu[çc][ãa]o|frase|resposta)[^:.]*[:.]?\s*/i,
+    /^minha (tradu[çc][ãa]o|resposta)[^:.]*[:.]?\s*/i,
+    /^a seguir[^:.]*[:.]?\s*/i,
+    /^conforme solicitado[^:.]*[:.]?\s*/i,
+    /^claro[!,.]?\s*/i,
+    /^certo[!,.]?\s*/i,
+    /^entendi[!,.]?\s*/i,
+  ]
+  for (const r of explicacoes) {
+    t = t.replace(r, '').trim()
+  }
+
   // Remove prefixos comuns (PORTUGUES:, TRADUCAO:, PT:, RESPOSTA:, etc)
   t = t.replace(/^(PORTUGUES|TRADUCAO|RESPOSTA|PT-?BR|PT|TRANSLATION|TRADU[ÇC][ÃA]O)[^:]*:\s*/i, '')
   // Remove aspas no inicio/fim
@@ -76,8 +97,12 @@ function sanitize(raw, original) {
   // So pega a primeira linha nao-vazia
   t = t.split(/\n/).map(l => l.trim()).find(l => l.length > 0) || ''
 
+  // Re-aplica strip de explicacoes depois da split (pode ter sobrado)
+  for (const r of explicacoes) {
+    t = t.replace(r, '').trim()
+  }
+
   // Remove palavras-chave do prompt que vazaram pra resposta (REGRAS:, INGLES:, etc)
-  // Se a linha COMECA com elas, descarta tudo ate o proximo ":" ou fim
   t = t.replace(/^(REGRAS|RULES|EN|INGLES|INPUT|OUTPUT|FRASE|TEXTO)\s*:?\s*-?\s*/i, '').trim()
 
   // Se sobrou so um padrao tipo "- algo", limpa o "-"

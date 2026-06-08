@@ -169,22 +169,25 @@ export async function applyAutoEdit({
 
   let filter
   if (isAlreadyVertical) {
-    // v1.2.6: source ja eh vertical (Reel IG/Short TT) - mantem 1080x1920
-    // Scale por largura preservando aspect, crop centro pra 1080x1920 exato.
-    // Se source >= 9:16 (mais alto que 9:16, ex: 4:5), corta laterais.
-    // Se source <= 9:16 (mais baixo, ex: square), pad top/bottom.
+    // Source ja vertical (Reel IG/Short TT): mantem 1080x1920
     filter = `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[stacked]`
     log?.('   🎬 Renderizando 1080x1920 (manter formato vertical do source)...')
   } else {
-    // Layout split-screen pra source 16:9 (YT/podcast):
-    //   y=0..608    -> video inteiro 16:9 (panorama)
-    //   y=608..1920 -> crop com face tracking (close em quem fala)
-    filter =
-      `[0:v]split=2[vA][vB];` +
-      `[vA]scale=1080:${TOP_H}:force_original_aspect_ratio=decrease,pad=1080:${TOP_H}:(ow-iw)/2:(oh-ih)/2:black[top];` +
-      `[vB]${cropFilter}[bot];` +
-      `[top][bot]vstack=inputs=2[stacked]`
-    log?.('   🎬 Renderizando reel split-screen (topo 16:9 + baixo face crop)...')
+    // v1.3.2: source horizontal (YT/podcast 16:9) NAO faz mais split-screen.
+    // Antes fazia: topo panorama 1080x608 + bottom face crop 1080x1312 - ficava feio
+    // pq mostrava o mesmo conteudo 2x (com gente reclamando).
+    // Agora: usa SO o face crop ocupando 1080x1920 inteiro (com cropFilter ja gerado
+    // pelo face tracking se tiver, senao crop central).
+    if (cropFilter) {
+      // Re-escala o crop pra 1080x1920 (era 1080x1312)
+      // cropFilter original: 'scale=-2:1312,crop=1080:1312:(iw-1080)/2:0' -> 1080x1312
+      // Adapta pra altura cheia: scale=-2:1920,crop=1080:1920:(iw-1080)/2:0
+      filter = `[0:v]scale=-2:1920,crop=1080:1920:(iw-1080)/2:0[stacked]`
+    } else {
+      // Fallback: crop central full-height
+      filter = `[0:v]scale=-2:1920,crop=1080:1920:(iw-1080)/2:0[stacked]`
+    }
+    log?.('   🎬 Renderizando 1080x1920 (crop central do horizontal, sem split-screen)...')
   }
   if (assPath) {
     const assEscaped = assPath.replace(/\\/g, '/').replace(/:/g, '\\:')

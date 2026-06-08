@@ -31,6 +31,11 @@ export async function loginViaElectron({ platform, username, dataDir }) {
     if (platform === 'youtube') {
       return await doLoginYouTubeViaChrome({ username, dataDir })
     }
+    // v1.3.2: TikTok tambem via Chrome REAL. TikTok detecta Electron
+    // (mesmo com sec-ch-ua spoofado) e bloqueia login.
+    if (platform === 'tiktok') {
+      return await doLoginTikTokViaChrome({ username, dataDir })
+    }
     return await doLogin({ platform, username, dataDir })
   } finally {
     activeLogins.delete(lockKey)
@@ -196,6 +201,125 @@ async function doLoginYouTubeViaChrome({ username, dataDir }) {
       try { await ctx.storageState({ path: sessionFile }) } catch {}
     })
     // Salva tb periodicamente caso o close listener nao dispare
+    const saveInterval = setInterval(async () => {
+      if (settled) { clearInterval(saveInterval); return }
+      try { await ctx.storageState({ path: sessionFile }) } catch {}
+    }, 5000)
+  })
+}
+
+// v1.3.2: TikTok login via Chrome REAL do sistema (igual YouTube).
+// TikTok detecta Electron mesmo com UA/CHrome spoofado (fingerprinting de
+// canvas/webgl/audio) e bloqueia o login (Erro 403 ou loop infinito).
+// Chrome real passa pelo anti-bot. Usa Playwright launchPersistentContext.
+async function doLoginTikTokViaChrome({ username, dataDir }) {
+  const { chromium } = await import('playwright')
+  const os = await import('node:os')
+  const sessionFile = path.join(dataDir, 'sessions', `tk-${username}.json`)
+  fs.mkdirSync(path.dirname(sessionFile), { recursive: true })
+
+  const tmpProfile = path.join(os.tmpdir(), `pm-tk-login-${username}-${Date.now()}`)
+  let ctx
+  try {
+    ctx = await chromium.launchPersistentContext(tmpProfile, {
+      channel: 'chrome',
+      headless: false,
+      viewport: { width: 1280, height: 900 },
+      locale: 'pt-BR',
+      args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
+    })
+  } catch (e) {
+    throw new Error(`Chrome nao encontrado no sistema. Instale o Google Chrome e tente de novo. (${e.message.slice(0,60)})`)
+  }
+
+  const page = await ctx.newPage()
+
+  // Banner orienta user: faz login no TikTok e FECHA a janela
+  await ctx.addInitScript(() => {
+    const PURPLE = 'linear-gradient(135deg,#6366f1,#8b5cf6)'
+    const GREEN = 'linear-gradient(135deg,#10b981,#047857)'
+
+    const updateBanner = () => {
+      if (!document.body) return
+      // TikTok logado: URL bate em / (feed) ou /@username, NAO em /login
+      const isLogado = !/\/login/i.test(location.pathname) && (
+        /\/foryou/i.test(location.pathname) ||
+        /^\/@/.test(location.pathname) ||
+        location.pathname === '/' ||
+        /\/upload/i.test(location.pathname) ||
+        /\/profile/i.test(location.pathname)
+      )
+      let b = document.getElementById('pm-login-banner')
+      if (!b) {
+        b = document.createElement('div')
+        b.id = 'pm-login-banner'
+        b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;color:#fff;padding:16px 24px;font-family:Segoe UI,sans-serif;display:flex;align-items:center;gap:14px;box-shadow:0 2px 20px rgba(0,0,0,.35);transition:background .3s'
+        document.body.insertBefore(b, document.body.firstChild)
+        document.body.style.paddingTop = '120px'
+      }
+      if (isLogado && !b.classList.contains('pm-success')) {
+        b.classList.add('pm-success')
+        b.style.background = GREEN
+        b.style.padding = '20px 30px'
+        b.innerHTML = '<span style="font-size:42px">✅</span><div style="flex:1"><strong style="font-size:22px;display:block">LOGIN CAPTURADO!</strong><span style="font-size:16px;font-weight:600;display:block;margin-top:4px">⚠️ FECHE ESTA JANELA AGORA (X no canto superior direito) pra o app finalizar o cadastro. Sem fechar, NAO PUBLICA.</span></div>'
+        document.body.style.paddingTop = '160px'
+      } else if (!isLogado) {
+        b.classList.remove('pm-success')
+        b.style.background = PURPLE
+        b.innerHTML = '<span style="font-size:22px">🎵</span><div style="flex:1"><strong style="font-size:14px">PostMaster: Login TikTok</strong><br><span style="opacity:.95;font-size:12px">1) Faca login normalmente.<br>2) Depois de logar, espera carregar o feed.<br>3) Entao <strong>FECHE ESTA JANELA</strong>.</span></div>'
+      }
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', updateBanner)
+    } else {
+      updateBanner()
+    }
+    setInterval(updateBanner, 1000)
+  })
+
+  await page.goto('https://www.tiktok.com/login', { waitUntil: 'domcontentloaded', timeout: 60000 })
+
+  return new Promise(async (resolve, reject) => {
+    let settled = false
+    let sawLogin = false
+    const timeoutId = setTimeout(async () => {
+      if (settled) return; settled = true
+      try { await ctx.close() } catch {}
+      reject(new Error('Tempo esgotado — login nao concluido em 10 minutos.'))
+    }, 10 * 60 * 1000)
+
+    const interval = setInterval(async () => {
+      if (settled) return
+      try {
+        const pages = ctx.pages()
+        if (pages.length === 0) {
+          settled = true
+          clearTimeout(timeoutId); clearInterval(interval)
+          if (!sawLogin) {
+            reject(new Error('Fechou sem completar o login. Tente de novo e ESPERA carregar o feed antes de fechar.'))
+            return
+          }
+          resolve({ ok: true, sessionFile })
+          return
+        }
+        // Detecta logado em qualquer tab
+        for (const p of pages) {
+          const u = p.url()
+          if (!u) continue
+          const path = (() => { try { return new URL(u).pathname } catch { return '' } })()
+          if (!path) continue
+          const isLogado = !/\/login/i.test(path) && (
+            /\/foryou/i.test(path) || /^\/@/.test(path) || path === '/' ||
+            /\/upload/i.test(path) || /\/profile/i.test(path)
+          )
+          if (isLogado) sawLogin = true
+        }
+      } catch {}
+    }, 1000)
+
+    ctx.on('close', async () => {
+      try { await ctx.storageState({ path: sessionFile }) } catch {}
+    })
     const saveInterval = setInterval(async () => {
       if (settled) { clearInterval(saveInterval); return }
       try { await ctx.storageState({ path: sessionFile }) } catch {}

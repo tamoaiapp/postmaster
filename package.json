@@ -1,24 +1,25 @@
 {
-    "name":  "postmaster",
-    "version":  "1.3.1",
-    "description":  "Automação de postagem com IA local",
-    "main":  "main.js",
-    "scripts":  {
-                    "start":  "electron . --dev",
-                    "dist":  "electron-builder --win --x64"
-                },
-    "dependencies":  {
-                         "dotenv":  "^16.4.5",
-                         "electron-updater":  "^6.8.3",
-                         "ffmpeg-static":  "^5.2.0",
-                         "node-llama-cpp":  "^3.18.1",
-                         "onnxruntime-node":  "^1.26.0",
-                         "playwright":  "^1.44.0",
-                         "sharp":  "^0.33.4"
-                     },
-    "devDependencies":  {
-                            "electron":  "^32.0.0",
-                            "electron-builder":  "^25.1.8"
-                        },
-    "author":  "iaempresa.app"
+    "name": "postmaster",
+    "version": "1.3.2",
+    "description": "Automação de postagem com IA local",
+    "main": "main.js",
+    "scripts": {
+        "start": "electron . --dev",
+        "dist": "electron-builder --win --x64"
+    },
+    "dependencies": {
+        "dotenv": "^16.4.5",
+        "electron-updater": "^6.8.3",
+        "ffmpeg-static": "^5.2.0",
+        "msedge-tts": "^2.0.5",
+        "node-llama-cpp": "^3.18.1",
+        "onnxruntime-node": "^1.26.0",
+        "playwright": "^1.44.0",
+        "sharp": "^0.33.4"
+    },
+    "devDependencies": {
+        "electron": "^32.0.0",
+        "electron-builder": "^25.1.8"
+    },
+    "author": "iaempresa.app"
 }
