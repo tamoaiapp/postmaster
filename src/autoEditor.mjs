@@ -122,12 +122,25 @@ export async function applyAutoEdit({
     log?.(`   🎤 Legenda karaokê: ${annotated.filter(w => w.highlight).length} destaques`)
   }
 
-  // ── 5. Face tracking denso ──────────────────────────────────────────────────
+  // v1.2.6: detecta aspect do source.
+  // - Source horizontal (YT/podcast 16:9): split-screen (topo panorama + face crop bottom)
+  // - Source ja vertical (IG/TT reel 9:16): so re-encoda pra 1080x1920 + legenda + watermark
+  //   NAO faz split-screen porque "panorama 1080x608" de um 9:16 fica espremido com black bars
+  //   e o "face crop bottom" eh redundante (video ja eh closer up)
+  const { width: srcWidth, height: srcHeight } = await getVideoDimensions(ffmpegPath, workingVideo)
+  const srcAspect = srcHeight / srcWidth  // > 1 = vertical, < 1 = horizontal
+  const isAlreadyVertical = srcAspect >= 1.2  // 9:16 = 1.78, 4:5 = 1.25, square = 1.0
+  log?.(`   📐 Source ${srcWidth}x${srcHeight} aspect=${srcAspect.toFixed(2)} ${isAlreadyVertical ? '(JA VERTICAL - skip split-screen)' : '(horizontal - usa split-screen + face crop)'}`)
+
+  // ── 5. Face tracking denso (so se source horizontal) ────────────────────────
   // Layout split-screen: topo = vídeo inteiro 16:9 (1080×608), baixo = crop face (1080×1312)
   // Total = 1920 (sem bandas pretas)
   const TOP_H    = 608   // vídeo inteiro 16:9 escalado pra 1080 wide
   const BOTTOM_H = 1312  // 1920 - 608
   let cropFilter = null
+  if (isAlreadyVertical) {
+    log?.('   ⏭ Pulando face track (video ja vertical)')
+  } else
   if (faceTrack) {
     try {
       const { width: srcW, height: srcH } = await getVideoDimensions(ffmpegPath, workingVideo)
@@ -146,31 +159,39 @@ export async function applyAutoEdit({
     }
   }
 
-  // Fallback se face tracking falhou OU não foi ligado
-  if (!cropFilter) {
+  // Fallback se face tracking falhou OU não foi ligado (so usado no modo horizontal)
+  if (!isAlreadyVertical && !cropFilter) {
     cropFilter = `scale=-2:${BOTTOM_H},crop=1080:${BOTTOM_H}:(iw-1080)/2:0`
   }
 
-  // ── 6. Render final SPLIT-SCREEN ────────────────────────────────────────────
-  // Layout 9:16:
-  //   y=0..608    → vídeo inteiro 16:9 (panorama, vê os 2 entrevistados)
-  //   y=608..1920 → crop com face tracking (close em quem fala, cuts secos)
-  //   Legenda fica burned NO CROP (parte inferior)
+  // ── 6. Render final ─────────────────────────────────────────────────────────
   if (fs.existsSync(outputPath)) try { fs.unlinkSync(outputPath) } catch {}
-  // Split vídeo em 2 streams. Top: scale 1080:608 com pad preto se aspect não bater.
-  // Bottom: aplica face crop (vai sair 1080×BOTTOM_H já).
-  let filter =
-    `[0:v]split=2[vA][vB];` +
-    `[vA]scale=1080:${TOP_H}:force_original_aspect_ratio=decrease,pad=1080:${TOP_H}:(ow-iw)/2:(oh-ih)/2:black[top];` +
-    `[vB]${cropFilter}[bot];` +
-    `[top][bot]vstack=inputs=2[stacked]`
+
+  let filter
+  if (isAlreadyVertical) {
+    // v1.2.6: source ja eh vertical (Reel IG/Short TT) - mantem 1080x1920
+    // Scale por largura preservando aspect, crop centro pra 1080x1920 exato.
+    // Se source >= 9:16 (mais alto que 9:16, ex: 4:5), corta laterais.
+    // Se source <= 9:16 (mais baixo, ex: square), pad top/bottom.
+    filter = `[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[stacked]`
+    log?.('   🎬 Renderizando 1080x1920 (manter formato vertical do source)...')
+  } else {
+    // Layout split-screen pra source 16:9 (YT/podcast):
+    //   y=0..608    -> video inteiro 16:9 (panorama)
+    //   y=608..1920 -> crop com face tracking (close em quem fala)
+    filter =
+      `[0:v]split=2[vA][vB];` +
+      `[vA]scale=1080:${TOP_H}:force_original_aspect_ratio=decrease,pad=1080:${TOP_H}:(ow-iw)/2:(oh-ih)/2:black[top];` +
+      `[vB]${cropFilter}[bot];` +
+      `[top][bot]vstack=inputs=2[stacked]`
+    log?.('   🎬 Renderizando reel split-screen (topo 16:9 + baixo face crop)...')
+  }
   if (assPath) {
     const assEscaped = assPath.replace(/\\/g, '/').replace(/:/g, '\\:')
     filter += `;[stacked]subtitles='${assEscaped}':charenc=UTF-8[out]`
   } else {
     filter += `;[stacked]null[out]`
   }
-  log?.('   🎬 Renderizando reel split-screen (topo 16:9 + baixo face crop)...')
   const finalCmd = `"${ffmpegPath}" -y -i "${workingVideo}" -filter_complex "${filter}" -map "[out]" -map 0:a? -c:v libx264 -preset fast -crf 22 -c:a aac -b:a 128k -movflags +faststart "${outputPath}"`
   await execAsync(finalCmd, { timeout: 900000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 })
 

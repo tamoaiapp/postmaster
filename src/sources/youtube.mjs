@@ -8,6 +8,7 @@ import fs from 'fs'
 import path from 'path'
 import ffmpegStaticOriginal from 'ffmpeg-static'
 import sharp from 'sharp'
+import { getVideoDimensions } from '../videoEditor.mjs'
 
 const execAsync = promisify(exec)
 
@@ -282,6 +283,15 @@ export async function converterParaReel(videoPath, thumbPath, log, opts = {}) {
   const outPath    = outputPath.replace(/\\/g, '/')
   const VIDEO_H    = 608
 
+  // v1.2.6: detecta aspect ratio do source. Se ja eh vertical (IG/TT reel),
+  // SO re-encoda pra 1080x1920 sem split-screen ou padding preto.
+  let srcAspect = null
+  try {
+    const dims = await getVideoDimensions(ffmpegPath, videoPath)
+    if (dims?.width && dims?.height) srcAspect = dims.height / dims.width
+  } catch {}
+  const isVertical = srcAspect != null && srcAspect >= 1.2
+
   // Marca dagua (texto OU imagem)
   const wmType = opts.watermarkType || 'none' // 'none' | 'text' | 'image'
   const wmText = (opts.watermarkText || '').trim()
@@ -294,8 +304,13 @@ export async function converterParaReel(videoPath, thumbPath, log, opts = {}) {
   let lastLabel
   let extraInputs = []
 
-  // Estagio 1: scale + pad pra 9:16 (com ou sem thumb)
-  if (thumbPath) {
+  if (isVertical && !thumbPath) {
+    // Source ja vertical: re-encoda pra 1080x1920 exato sem padding preto
+    log?.(`   📐 Source vertical (aspect ${srcAspect.toFixed(2)}) - mantendo formato sem split-screen`)
+    filterParts.push(`[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[base]`)
+    lastLabel = 'base'
+  } else if (thumbPath) {
+    // Source horizontal + thumb (YouTube com thumb no topo)
     const tp = thumbPath.replace(/\\/g, '/')
     extraInputs.push(`-i "${tp}"`)
     let thumbH = 608
@@ -308,6 +323,7 @@ export async function converterParaReel(videoPath, thumbPath, log, opts = {}) {
     filterParts.push(`[padded][thumb]overlay=0:${thumbY}:eof_action=repeat[base]`)
     lastLabel = 'base'
   } else {
+    // Source horizontal sem thumb (raro - so IG/TT que ainda nao detectaram vertical)
     const videoY = Math.round((1920 - VIDEO_H) / 2)
     filterParts.push(`[0:v]scale=1080:${VIDEO_H},pad=1080:1920:0:${videoY}:black[base]`)
     lastLabel = 'base'
