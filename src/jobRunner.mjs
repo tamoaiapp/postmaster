@@ -89,6 +89,14 @@ export default async function jobRunner(job, dataDir, log) {
       excludeRanges = reuse.excludeRanges
       videoSource = 'reaproveitado'
       log(`♻️  Reaproveitando vídeo (${excludeRanges.length} trecho(s) já usado(s))`)
+    } else if (job.source === 'youtube' && job.youtubeSourceType === 'single') {
+      // v1.2.0: modo "video unico" — usuario colou URLs de videos especificos
+      // Pula scrape de canal, pega proximo video da lista nao-postado
+      liveView.updateStatus(liveJobId, 'Buscando video unico')
+      const { buscarVideoUnico } = await import('./sources/youtube.mjs')
+      const videoUnico = await buscarVideoUnico(job.sourceUrls || '', stateFile, log, dataDir)
+      if (!videoUnico) { log('⏭ Todos os videos da lista ja foram postados'); return { posted: false } }
+      video = videoUnico
     } else {
       // 2️⃣ Busca novo vídeo no canal
       liveView.updateStatus(liveJobId, 'Buscando vídeos no canal')

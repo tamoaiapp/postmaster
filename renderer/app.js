@@ -763,7 +763,7 @@ async function editJob(id) {
   // Pre-preenche com TUDO do job (defaults mesclados pra campos novos que job antigo nao tinha)
   wizardData = {
     name: '', platform: 'instagram', account: '',
-    source: 'youtube', sourceUrls: '', sourceHandles: '',
+    source: 'youtube', sourceUrls: '', sourceHandles: '', youtubeSourceType: 'channel',
     filterMinDur: 10, filterMaxDur: 3600,
     filterKeywordInclude: '', filterKeywordExclude: '',
     filterOnlyNew: true, filterMaxVideos: 20,
@@ -792,7 +792,7 @@ function openWizard() {
   wizardStep = 0
   wizardData = {
     name: '', platform: 'instagram', account: '',
-    source: 'youtube', sourceUrls: '', sourceHandles: '',
+    source: 'youtube', sourceUrls: '', sourceHandles: '', youtubeSourceType: 'channel',
     // Filtros de fonte. Duração: defaults amplos = sem filtro efetivo.
     // Filtro de duração removido do UI em v1.0.44 — o cliente nao via o
     // campo, mas o default antigo (60-300s) descartava videos do canal
@@ -935,8 +935,27 @@ function getWizardBody(step) {
 
       ${wizardData.source === 'youtube' ? `
         <div class="form-group">
-          <label>Canais do YouTube <span class="text-muted">(um por linha)</span></label>
-          <textarea id="wiz-urls" rows="3" placeholder="https://www.youtube.com/@canal1/videos&#10;https://www.youtube.com/@canal2/videos">${esc(wizardData.sourceUrls)}</textarea>
+          <label>Tipo de fonte YouTube</label>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px;border:1px solid var(--border);border-radius:10px;${wizardData.youtubeSourceType==='channel' || !wizardData.youtubeSourceType?'background:rgba(99,102,241,0.08);border-color:rgba(99,102,241,0.4)':''}">
+              <input type="radio" name="youtubeSourceType" value="channel" ${wizardData.youtubeSourceType==='channel'||!wizardData.youtubeSourceType?'checked':''} onchange="wizardData.youtubeSourceType='channel';renderWizardStep()" style="margin:0">
+              <div style="flex:1">
+                <div style="font-weight:700;font-size:13.5px">📺 Canal / Perfil</div>
+                <div style="font-size:12px;color:var(--text-dim);margin-top:2px">Cole 1+ URL de canal. O bot busca vídeos novos automaticamente.</div>
+              </div>
+            </label>
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px;border:1px solid var(--border);border-radius:10px;${wizardData.youtubeSourceType==='single'?'background:rgba(99,102,241,0.08);border-color:rgba(99,102,241,0.4)':''}">
+              <input type="radio" name="youtubeSourceType" value="single" ${wizardData.youtubeSourceType==='single'?'checked':''} onchange="wizardData.youtubeSourceType='single';renderWizardStep()" style="margin:0">
+              <div style="flex:1">
+                <div style="font-weight:700;font-size:13.5px">🎬 Vídeo único <span style="color:#a78bfa;font-size:11px;font-weight:600">URL DIRETA</span></div>
+                <div style="font-size:12px;color:var(--text-dim);margin-top:2px">Cole 1+ URL de vídeo (youtu.be/XXX ou youtube.com/watch). Posta cada um UMA vez.</div>
+              </div>
+            </label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>${wizardData.youtubeSourceType==='single' ? 'URLs de vídeos' : 'Canais do YouTube'} <span class="text-muted">(um por linha)</span></label>
+          <textarea id="wiz-urls" rows="3" placeholder="${wizardData.youtubeSourceType==='single' ? 'https://youtu.be/abcdef12345&#10;https://www.youtube.com/watch?v=xyz789' : 'https://www.youtube.com/@canal1/videos&#10;https://www.youtube.com/@canal2/videos'}">${esc(wizardData.sourceUrls)}</textarea>
         </div>` : ''}
 
       ${['instagram','tiktok'].includes(wizardData.source) ? `

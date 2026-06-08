@@ -158,6 +158,52 @@ export const PLATFORM_LIMITS = {
   tiktok: 600,   // 10min, mas pra viral o ideal eh ate 60s
 }
 
+// v1.2.0: extrai videoId de qualquer URL aceita pelo YT
+export function extractVideoId(url) {
+  if (!url) return null
+  const m1 = String(url).match(/(?:v=|\/shorts\/|youtu\.be\/)([\w-]{11})/)
+  if (m1) return m1[1]
+  // Fallback: se o cara colou so o ID (11 chars)
+  const m2 = String(url).match(/^([\w-]{11})$/)
+  return m2 ? m2[1] : null
+}
+
+// v1.2.0: busca proxima URL de video unico ainda nao postada
+// Devolve { id, duracao, titulo } ou null se todas postadas
+export async function buscarVideoUnico(urls, stateFile, log, dataDir = null) {
+  const state = loadState(stateFile)
+  const postados = new Set(state.postados || [])
+  const lista = urls.split('\n').map(s => s.trim()).filter(Boolean)
+  if (!lista.length) throw new Error('Nenhuma URL de video configurada')
+
+  // Pega primeira URL com video ID valido que ainda nao foi postado
+  for (const u of lista) {
+    const id = extractVideoId(u)
+    if (!id) {
+      log(`⚠️ URL invalida (sem video ID): ${u.slice(0, 80)}`)
+      continue
+    }
+    if (postados.has(id)) continue
+    // Pega metadados via yt-dlp --print
+    log(`🎬 Video unico: ${u}`)
+    try {
+      const { stdout } = await execAsync(
+        `${YTDLP} ${await getYoutubeCookiesArg(log, dataDir)} --skip-download --print "%(id)s\t%(duration)s\t%(title)s" "https://www.youtube.com/watch?v=${id}"`,
+        { timeout: 60000, windowsHide: true }
+      )
+      const parts = stdout.trim().split('\t')
+      const duracao = parseFloat(parts[1]) || 0
+      const titulo = parts[2]?.trim() || ''
+      log(`   ✓ ${titulo.slice(0, 60)} (${Math.round(duracao)}s)`)
+      return { id, duracao, titulo }
+    } catch (e) {
+      log(`⚠️ Falha buscando metadata do video ${id}: ${e.message.split('\n')[0]}`)
+      continue
+    }
+  }
+  return null
+}
+
 export async function baixarVideoYoutube(video, downloadsDir, prefix, log, dataDir = null, cutRange = null) {
   fs.mkdirSync(downloadsDir, { recursive: true })
 
