@@ -92,10 +92,16 @@ export default async function jobRunner(job, dataDir, log) {
     } else {
       // 2️⃣ Busca novo vídeo no canal
       liveView.updateStatus(liveJobId, 'Buscando vídeos no canal')
+      // v1.1.9: pra postar no YouTube, video TEM que ser >= 8min (480s).
+      // YT prioriza videos longos (8-16min). Shorts (<60s) caem como Shorts, nao no feed,
+      // e o pipeline auto-edit 16:9 nao foi feito pra eles.
+      let minDurFinal = job.filterMinDur ?? 10
+      if (job.platform === 'youtube' && minDurFinal < 480) {
+        log(`⚠️ Job filterMinDur=${minDurFinal}s mas plataforma YouTube exige >= 480s (8min). Forcando 480.`)
+        minDurFinal = 480
+      }
       const candidatos = await buscarVideoYoutube(job.sourceUrls || '', stateFile, log, {
-        // Defaults amplos: sem filtro de duracao por padrao (v1.0.44+).
-        // Antes 60-300s descartava videos do canal silenciosamente.
-        minDur:         job.filterMinDur         ?? 10,
+        minDur:         minDurFinal,
         maxDur:         job.filterMaxDur         ?? 3600,
         maxVideos:      job.filterMaxVideos       ?? 20,
         keywordInclude: job.filterKeywordInclude  || '',

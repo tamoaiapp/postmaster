@@ -140,23 +140,21 @@ function List-UIA-Elements([string]$controlType) {
 }
 
 # Set value em elemento UIA editavel (textarea, input)
+# v1.1.9: YT Studio usa contenteditable React. ValuePattern.SetValue muda o DOM
+# mas NAO dispara input event do React, e o titulo fica como filename default.
+# Usa sempre Click + Ctrl+A + Delete + Clipboard paste (Ctrl+V dispara input event ok).
 function Set-UIAValue($el, [string]$text) {
     if (-not $el) { throw "elemento nulo" }
-    $valuePattern = $null
-    if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
-        $valuePattern.SetValue($text)
-    } else {
-        # Fallback: click + Ctrl+A + Delete + clipboard paste
-        Click-UIA $el "campo (fallback)"
-        Start-Sleep -Milliseconds 300
-        [System.Windows.Forms.SendKeys]::SendWait("^a")
-        Start-Sleep -Milliseconds 200
-        [System.Windows.Forms.SendKeys]::SendWait("{DELETE}")
-        Start-Sleep -Milliseconds 200
-        Set-Clipboard -Value $text
-        Start-Sleep -Milliseconds 200
-        [System.Windows.Forms.SendKeys]::SendWait("^v")
-    }
+    Click-UIA $el "campo"
+    Start-Sleep -Milliseconds 300
+    [System.Windows.Forms.SendKeys]::SendWait("^a")
+    Start-Sleep -Milliseconds 200
+    [System.Windows.Forms.SendKeys]::SendWait("{DELETE}")
+    Start-Sleep -Milliseconds 200
+    Set-Clipboard -Value $text
+    Start-Sleep -Milliseconds 300
+    [System.Windows.Forms.SendKeys]::SendWait("^v")
+    Start-Sleep -Milliseconds 400
 }
 
 # === STEP 1: valida video, abre Chrome ===
