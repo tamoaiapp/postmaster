@@ -460,31 +460,89 @@ if ($DryRun) {
 }
 Write-Host "[10] Clicando Publicar..."
 Start-Sleep -Milliseconds 1500
-$publicar = Find-UIA-Like-InBounds "publicar" "Button" 200 9999 8000
-if (-not $publicar) { $publicar = Find-UIA-Like-InBounds "salvar" "Button" 200 9999 3000 }
+
+# v1.3.0: YouTube React NAO expoe Publicar como UIA Button (shadow DOM / role mal-configurado).
+# Tentativas UIA caem em texto "publicar" do header ou dos termos, nao no botao real.
+# Solucao: calcula coord do botao geometricamente (bottom-right da janela do Chrome com Studio).
+# Validado em (winRight-110, winBottom-50) com dialog YT upload. Single click fechou o dialog.
+$publicado = $false
+
+# 1) Tentativa UIA primeiro (versao antiga, pode funcionar em alguns layouts)
+$publicar = Find-UIA-Like-InBounds "publicar" "Button" 200 9999 4000
+if (-not $publicar) { $publicar = Find-UIA-Like-InBounds "salvar" "Button" 200 9999 2000 }
 if ($publicar) {
-    Write-Host "  achei: '$($publicar.Current.Name)'"
-    # UIA Invoke primeiro (React listener), fallback Win32
+    Write-Host "  via UIA: '$($publicar.Current.Name)'"
     $invokePat = $null
     if ($publicar.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invokePat)) {
-        Write-Host "  publicando via UIA Invoke"
         $invokePat.Invoke()
     } else {
         Click-UIA $publicar "Publicar"
     }
-    Start-Sleep -Seconds 6
+    Start-Sleep -Seconds 4
     Snap "11-after-publish"
-    # Verifica se dialog fechou (rascunho seria status mudado pra fora de Visibilidade)
-    $stillOpen = Find-UIA-Like "Visibilidade" "" 2000
-    if ($stillOpen) {
-        Write-Host "  AVISO: dialog ainda aberto - retry com Win32 click"
-        Click-UIA $publicar "Publicar (retry Win32)"
-        Start-Sleep -Seconds 5
-        Snap "11b-after-retry"
+    $stillOpen = Find-UIA-Like "Visibilidade" "" 1500
+    if (-not $stillOpen) {
+        Write-Host "  PUBLICADO (UIA)!"
+        $publicado = $true
     }
-    Write-Host "  PUBLICADO!"
-} else {
-    Write-Host "  AVISO: Publicar nao achado. Buttons:"
+}
+
+# 2) Fallback: calcula coord geometrica e clica via mouse_event
+if (-not $publicado) {
+    Write-Host "  UIA falhou ou dialog ainda aberto - usando coord geometrica..."
+    # Acha janela do Chrome com Studio
+    $rootEl = [System.Windows.Automation.AutomationElement]::RootElement
+    $winCond = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+        [System.Windows.Automation.ControlType]::Window
+    )
+    $wins = $rootEl.FindAll([System.Windows.Automation.TreeScope]::Children, $winCond)
+    $chromeWin = $null
+    foreach ($w in $wins) {
+        $n = $w.Current.Name
+        if ($n -match 'Google Chrome' -and ($n -match 'Studio' -or $n -match 'YouTube')) { $chromeWin = $w; break }
+    }
+    if ($chromeWin) {
+        $r = $chromeWin.Current.BoundingRectangle
+        # Botao Publicar no canto inferior direito do dialog (que ocupa quase a janela toda)
+        $px = [int]$r.Right - 110
+        $py = [int]$r.Bottom - 50
+        Write-Host "  janela rect=($([int]$r.Left),$([int]$r.Top))-($([int]$r.Right),$([int]$r.Bottom))"
+        Write-Host "  clicando em ($px, $py)"
+        # Foco
+        [W32]::SetForegroundWindow($chromeWin.Current.NativeWindowHandle) | Out-Null
+        Start-Sleep -Milliseconds 500
+        [W32]::SetCursorPos($px, $py) | Out-Null
+        Start-Sleep -Milliseconds 200
+        [W32]::mouse_event(0x0002, 0, 0, 0, 0)
+        Start-Sleep -Milliseconds 80
+        [W32]::mouse_event(0x0004, 0, 0, 0, 0)
+        Start-Sleep -Seconds 5
+        Snap "11-after-publish-coord"
+
+        # Verifica fechamento
+        $check = Find-UIA-Like "Visibilidade" "" 2000
+        if (-not $check) {
+            Write-Host "  PUBLICADO (coord geometrica)!"
+            $publicado = $true
+        } else {
+            Write-Host "  Dialog ainda aberto. Retry com offset alternativo (right-90, bottom-40)..."
+            [W32]::SetCursorPos(([int]$r.Right - 90), ([int]$r.Bottom - 40)) | Out-Null
+            Start-Sleep -Milliseconds 200
+            [W32]::mouse_event(0x0002, 0, 0, 0, 0)
+            Start-Sleep -Milliseconds 80
+            [W32]::mouse_event(0x0004, 0, 0, 0, 0)
+            Start-Sleep -Seconds 5
+            $check2 = Find-UIA-Like "Visibilidade" "" 2000
+            if (-not $check2) { Write-Host "  PUBLICADO (retry)!"; $publicado = $true }
+        }
+    } else {
+        Write-Host "  ERRO: janela do Chrome com Studio nao encontrada"
+    }
+}
+
+if (-not $publicado) {
+    Write-Host "  AVISO: NAO consegui publicar via UIA NEM coord. Buttons:"
     List-UIA-Elements "Button"
 }
 
