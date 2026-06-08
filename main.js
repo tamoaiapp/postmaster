@@ -134,6 +134,26 @@ function setupAutoUpdate() {
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
 
+    // v1.3.1: canal beta exclusivo pro dev (Tiago).
+    // Se existir o arquivo flag em userData/.postmaster-beta, o app passa a aceitar
+    // pre-releases — assim o Tiago testa antes de promover pra clientes.
+    // Clientes nao tem esse arquivo, entao so atualizam quando uma release sai como
+    // "latest" no GitHub (manual via "Set as latest" na UI do GH Releases).
+    try {
+      const fs = require('fs')
+      const flagPath = require('path').join(app.getPath('userData'), '.postmaster-beta')
+      if (fs.existsSync(flagPath)) {
+        autoUpdater.allowPrerelease = true
+        autoUpdater.channel = 'beta'
+        console.log('[update] modo BETA ativado (flag local presente) - aceita pre-releases')
+      } else {
+        autoUpdater.allowPrerelease = false
+        console.log('[update] modo stable - so atualiza quando release vira "latest"')
+      }
+    } catch (e) {
+      console.error('[update] erro lendo flag beta:', e?.message)
+    }
+
     autoUpdater.on('checking-for-update', () => console.log('[update] verificando...'))
     autoUpdater.on('update-available', (info) => {
       console.log('[update] nova versao disponivel:', info.version)

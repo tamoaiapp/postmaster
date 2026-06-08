@@ -546,6 +546,63 @@ if (-not $publicado) {
     List-UIA-Elements "Button"
 }
 
+# === STEP 11: Confirma "Publicar mesmo assim" se YT abrir modal de verificacao incompleta ===
+# v1.3.1: quando verificacao initial ainda ta rodando, YT abre 2o modal:
+# "Ainda estamos verificando seu conteudo - Publicar mesmo assim / Voltar"
+# Se nao clicar nesse, video fica em rascunho mesmo tendo clicado o Publicar do dialog principal.
+Start-Sleep -Seconds 2
+Write-Host "[11] Procurando modal 'Ainda estamos verificando'..."
+$rootAE = Get-RootAE
+$ainda = $null
+foreach ($e in $rootAE.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+    try {
+        $n = $e.Current.Name
+        if ($n -and $n -match 'Ainda estamos verificando' -and -not $e.Current.IsOffscreen) {
+            $ainda = $e; break
+        }
+    } catch {}
+}
+if ($ainda) {
+    Write-Host "  Modal de confirmacao detectado - clicando 'Publicar mesmo assim'"
+    # O botao "Publicar mesmo assim" eh o CTA preto, canto inferior direito do modal.
+    # Modal eh aprox 500x300px, centralizado na janela. Coord aproximada:
+    # 25px direita do centro X, 145px abaixo do centro Y
+    $wR = $rootAE.Current.BoundingRectangle
+    $cx = ([int]$wR.Left + [int]$wR.Right) / 2
+    $cy = ([int]$wR.Top + [int]$wR.Bottom) / 2
+    $confirmX = [int]($cx + 25)
+    $confirmY = [int]($cy + 145)
+    Write-Host "  clicando em ($confirmX, $confirmY)"
+    Set-WindowFocus $script:hwnd
+    Start-Sleep -Milliseconds 400
+    [W32]::SetCursorPos($confirmX, $confirmY) | Out-Null
+    Start-Sleep -Milliseconds 200
+    [W32]::mouse_event(0x0002, 0, 0, 0, 0)
+    Start-Sleep -Milliseconds 80
+    [W32]::mouse_event(0x0004, 0, 0, 0, 0)
+    Start-Sleep -Seconds 5
+    Snap "12-after-confirm"
+
+    # Confirma que modal sumiu
+    $check3 = $null
+    foreach ($e in $rootAE.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+        try { if ($e.Current.Name -match 'Ainda estamos verificando') { $check3 = $e; break } } catch {}
+    }
+    if ($check3) {
+        Write-Host "  Modal AINDA aberto - retry coord (centro+50, centro+160)..."
+        [W32]::SetCursorPos(([int]($cx + 50)), ([int]($cy + 160))) | Out-Null
+        Start-Sleep -Milliseconds 200
+        [W32]::mouse_event(0x0002, 0, 0, 0, 0)
+        Start-Sleep -Milliseconds 80
+        [W32]::mouse_event(0x0004, 0, 0, 0, 0)
+        Start-Sleep -Seconds 4
+    } else {
+        Write-Host "  Modal confirmado e fechado - PUBLICADO de verdade!"
+    }
+} else {
+    Write-Host "  Nenhum modal de confirmacao (verificacao ja completa OU video sem aviso)"
+}
+
 Write-Host ""
 Write-Host "=== STEP 6 OK - verificar screenshots e prosseguir step 7+ depois ==="
 Write-Host "Screenshots em: $outDir"

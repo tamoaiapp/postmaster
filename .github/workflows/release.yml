@@ -231,15 +231,22 @@ jobs:
             "Release v${{ steps.ver.outputs.version }}. Auto-update do PostMaster pega sozinho." | Out-File dist/RELEASE_NOTES.md -Encoding utf8
           }
 
-      - name: Publish GitHub Release (cria ou re-upload assets)
+      - name: Publish GitHub Release (cria ou re-upload assets) - PRE-RELEASE por padrao
         if: steps.check.outputs.skip != 'true'
         shell: pwsh
+        # v1.3.1: TODA release sai como --prerelease + --latest=false. Clientes (sem o
+        # arquivo flag ~userData/.postmaster-beta) so atualizam quando uma release for
+        # MANUALMENTE marcada como "Set as latest" na UI do GitHub Releases.
+        # Dev (Tiago) tem o flag local -> autoUpdater.allowPrerelease=true -> pega tudo.
+        # Antes: cada push virava update pra todo cliente em 15min -> muita reclamacao.
         run: |
           $tag = '${{ steps.ver.outputs.tag }}'
           gh release create $tag `
             --repo ${{ github.repository }} `
             --title '${{ steps.ver.outputs.version }}' `
             --notes-file dist/RELEASE_NOTES.md `
+            --prerelease `
+            --latest=false `
             dist/PostMaster-Setup.exe `
             dist/PostMaster-Setup.exe.blockmap `
             dist/latest.yml
