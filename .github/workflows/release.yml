@@ -137,8 +137,13 @@ jobs:
           try {
             Invoke-WebRequest $whisperUrl -OutFile $whisperZip -ErrorAction Stop
             Expand-Archive $whisperZip -DestinationPath "$env:RUNNER_TEMP\whisper" -Force
-            # -Filter aceita SO 1 string. Pra multiplos nomes, usa Where-Object.
-            $whisperExe = Get-ChildItem -Recurse "$env:RUNNER_TEMP\whisper" -File | Where-Object { $_.Name -in 'whisper-cli.exe','main.exe' } | Select-Object -First 1
+            # whisper.cpp latest tem 'whisper-cli.exe' (real) E 'main.exe' (deprecation
+            # shim que so imprime warning + exit 1). Prioriza whisper-cli.exe explicitamente,
+            # fallback pra main.exe so se nao tiver (releases antigos).
+            $whisperExe = Get-ChildItem -Recurse "$env:RUNNER_TEMP\whisper" -File -Filter 'whisper-cli.exe' | Select-Object -First 1
+            if (-not $whisperExe) {
+              $whisperExe = Get-ChildItem -Recurse "$env:RUNNER_TEMP\whisper" -File -Filter 'main.exe' | Select-Object -First 1
+            }
             if ($whisperExe) {
               Copy-Item $whisperExe.FullName "bin\whisper-cli.exe" -Force
               # Copia DLLs ao lado (whisper precisa)
