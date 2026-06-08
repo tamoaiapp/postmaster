@@ -342,21 +342,19 @@ Write-Host "[7] Marcando 'Nao e conteudo para criancas' via UIA SelectionItemPat
 $naoKids = Find-UIA-Like "nao e conteudo" "RadioButton" 5000
 if ($naoKids) {
     Write-Host "  achei radio: '$($naoKids.Current.Name)'"
-    # Scroll ate o elemento (se nao estah visivel)
     $scrollPat = $null
     if ($naoKids.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern, [ref]$scrollPat)) {
         $scrollPat.ScrollIntoView()
         Start-Sleep -Milliseconds 500
     }
-    # Select via SelectionItemPattern (selects radio button sem coord)
-    $selPat = $null
-    if ($naoKids.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selPat)) {
-        Write-Host "  selecionando via SelectionItemPattern"
-        $selPat.Select()
-    } else {
-        Write-Host "  SelectionItemPattern indisponivel - usando Click-UIA"
-        Click-UIA $naoKids "Nao e conteudo kids"
-    }
+    # v1.3.3: SetFocus + tecla ESPACO. React captura keydown(Space) e toggle o radio.
+    # SEM mover mouse - usuario reclamou de mouse pulando na tela.
+    Write-Host "  SetFocus + SendKeys ESPACO"
+    Set-WindowFocus $script:hwnd
+    Start-Sleep -Milliseconds 200
+    try { $naoKids.SetFocus() } catch {}
+    Start-Sleep -Milliseconds 400
+    [System.Windows.Forms.SendKeys]::SendWait(' ')
     Start-Sleep -Milliseconds 1000
     Snap "08-after-kids"
 } else {
@@ -437,13 +435,14 @@ if ($visRadio) {
         $scrollPat.ScrollIntoView()
         Start-Sleep -Milliseconds 400
     }
-    $selPat = $null
-    if ($visRadio.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$selPat)) {
-        $selPat.Select()
-    } else {
-        Click-UIA $visRadio "Vis $visLabel"
-    }
-    Start-Sleep -Milliseconds 800
+    # v1.3.3: SetFocus + tecla ESPACO. React captura keydown(Space) e toggle.
+    Write-Host "  SetFocus + SendKeys ESPACO"
+    Set-WindowFocus $script:hwnd
+    Start-Sleep -Milliseconds 200
+    try { $visRadio.SetFocus() } catch {}
+    Start-Sleep -Milliseconds 400
+    [System.Windows.Forms.SendKeys]::SendWait(' ')
+    Start-Sleep -Milliseconds 1000
     Snap "10-after-vis"
 } else {
     Write-Host "  '$visLabel' RadioButton exato nao achado. RadioButtons:"
@@ -563,41 +562,37 @@ foreach ($e in $rootAE.FindAll([System.Windows.Automation.TreeScope]::Descendant
     } catch {}
 }
 if ($ainda) {
-    Write-Host "  Modal de confirmacao detectado - clicando 'Publicar mesmo assim'"
-    # O botao "Publicar mesmo assim" eh o CTA preto, canto inferior direito do modal.
-    # Modal eh aprox 500x300px, centralizado na janela. Coord aproximada:
-    # 25px direita do centro X, 145px abaixo do centro Y
-    $wR = $rootAE.Current.BoundingRectangle
-    $cx = ([int]$wR.Left + [int]$wR.Right) / 2
-    $cy = ([int]$wR.Top + [int]$wR.Bottom) / 2
-    $confirmX = [int]($cx + 25)
-    $confirmY = [int]($cy + 145)
-    Write-Host "  clicando em ($confirmX, $confirmY)"
-    Set-WindowFocus $script:hwnd
-    Start-Sleep -Milliseconds 400
-    [W32]::SetCursorPos($confirmX, $confirmY) | Out-Null
-    Start-Sleep -Milliseconds 200
-    [W32]::mouse_event(0x0002, 0, 0, 0, 0)
-    Start-Sleep -Milliseconds 80
-    [W32]::mouse_event(0x0004, 0, 0, 0, 0)
-    Start-Sleep -Seconds 5
-    Snap "12-after-confirm"
-
-    # Confirma que modal sumiu
-    $check3 = $null
+    Write-Host "  Modal de confirmacao detectado - procurando botao 'Publicar mesmo assim' via UIA"
+    # v1.3.3: Descobri no log que YT EXPOE "Publicar mesmo assim" como UIA element
+    # com nome exato. Antes chutava coord (centro+25, centro+145) e errava 40px Y.
+    # Agora acha por nome e usa o rect REAL do botao.
+    $btnConfirm = $null
     foreach ($e in $rootAE.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
-        try { if ($e.Current.Name -match 'Ainda estamos verificando') { $check3 = $e; break } } catch {}
+        try {
+            if ($e.Current.IsOffscreen) { continue }
+            $n = $e.Current.Name
+            if ($n -and $n -eq 'Publicar mesmo assim') { $btnConfirm = $e; break }
+        } catch {}
     }
-    if ($check3) {
-        Write-Host "  Modal AINDA aberto - retry coord (centro+50, centro+160)..."
-        [W32]::SetCursorPos(([int]($cx + 50)), ([int]($cy + 160))) | Out-Null
-        Start-Sleep -Milliseconds 200
-        [W32]::mouse_event(0x0002, 0, 0, 0, 0)
-        Start-Sleep -Milliseconds 80
-        [W32]::mouse_event(0x0004, 0, 0, 0, 0)
-        Start-Sleep -Seconds 4
+    if ($btnConfirm) {
+        $r = $btnConfirm.Current.BoundingRectangle
+        # Primeiro tenta UIA Invoke (mais limpo, sem mover mouse)
+        $ip = $null
+        if ($btnConfirm.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$ip)) {
+            Write-Host "  via UIA Invoke"
+            $ip.Invoke()
+        } else {
+            # Fallback: SetFocus + Enter
+            Write-Host "  via SetFocus + Enter"
+            try { $btnConfirm.SetFocus() } catch {}
+            Start-Sleep -Milliseconds 300
+            [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+        }
+        Start-Sleep -Seconds 5
+        Snap "12-after-confirm"
+        Write-Host "  Modal de confirmacao processado"
     } else {
-        Write-Host "  Modal confirmado e fechado - PUBLICADO de verdade!"
+        Write-Host "  AVISO: 'Publicar mesmo assim' nao achado via UIA"
     }
 } else {
     Write-Host "  Nenhum modal de confirmacao (verificacao ja completa OU video sem aviso)"
