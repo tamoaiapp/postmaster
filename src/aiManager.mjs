@@ -158,30 +158,44 @@ export async function gerarCaption(titulo, nicho = 'conteúdo geral') {
   // Limpa o título antes de mandar pra IA — evita que ela "puxe" o nome do veículo
   const tituloLimpo = stripForbiddenOutlets(titulo).replace(/^[-:\s]+|[-:\s]+$/g, '').trim() || titulo
 
-  const prompt = `Escreva uma legenda CURTA pra um Reel de ${nicho} sobre: "${tituloLimpo}".
+  // v1.2.3: Qwen 0.5B as vezes entra em loop de placeholder ("#Nome de Pessoa #Nome de Jogador..."),
+  // copiando literalmente os EXEMPLOS abstratos do prompt. Trocado por exemplos CONCRETOS
+  // e adicionado anti-loop no post-processamento.
+  const prompt = `Escreva uma legenda CURTA e REAL pra um Reel sobre: "${tituloLimpo}".
 
 REGRAS:
-- Foque em SEO: use palavras que as pessoas pesquisam (nomes de artistas, lugares, situações).
-- NÃO copie o título. Reescreva com outras palavras, mantendo o assunto.
-- NUNCA cite veículos de imprensa (jornal, canal de TV, portal de notícia, etc).
-- Pode citar nomes de pessoas, artistas, cantores, jogadores.
-- Use 1-2 emojis.
-- 2 a 3 linhas no total.
-- Termina com 5 a 7 hashtags em PT-BR, com termos pesquisáveis (#nomedoartista, #cidade, #tema), uma palavra por hashtag.
+- 1 linha de texto + 5 a 7 hashtags REAIS (uma palavra cada, sem espaços).
+- Não use palavras genericas tipo "Nome", "Tema", "Conteúdo", "Situação", "Lugar" nas hashtags.
+- Não escreva placeholders. Hashtag tem que ser uma coisa REAL: #futebol, #carnaval, #musica, etc.
+- Pode citar pessoas, artistas, cantores. NUNCA jornal, TV, portal de noticia.
+- 1 emoji no maximo.
+- Maximo 200 caracteres.
 
-Responda SÓ a legenda. Sem prefixo, sem "Aqui está", sem aspas.`
+EXEMPLO DE BOA LEGENDA:
+Esse passe foi cirurgico 😱 #futebol #brasileirao #craque #gol #neymar
+
+EXEMPLO DE LEGENDA RUIM (NAO FAZER):
+#Reel #SEO #Nome de Pessoa #Nome de Lugar #Tema
+
+Responda SO a legenda final. Sem prefixo, sem aspas.`
 
   const run = async () => {
     const ctx     = await _model.createContext({ contextSize: 1024 })
     const session = new LlamaChatSession({ contextSequence: ctx.getSequence() })
     try {
-      let texto = await session.prompt(prompt, { maxTokens: 250 })
+      let texto = await session.prompt(prompt, { maxTokens: 180 })
       texto = texto.trim()
       texto = texto.split('\n').filter(l => !PREAMBLE.test(l.trim())).join('\n').trim()
       texto = texto.replace(/^["'""]|["'""]$/g, '').trim()
-      // Defesa em profundidade: remove veículos que escaparam
+      // Defesa em profundidade: remove veiculos que escaparam
       texto = stripForbiddenOutlets(texto)
-      return texto || fallback(tituloLimpo, nicho)
+      // v1.2.3: remove placeholder ("#Nome de XX") e loop de hashtags genericas
+      texto = stripPlaceholders(texto)
+      // Sanity: se sobrou pouca coisa real (so 1-2 chars + hashtags lixo), usa fallback
+      if (!texto || isMostlyPlaceholder(texto)) {
+        return fallback(tituloLimpo, nicho)
+      }
+      return texto
     } finally {
       ctx.dispose()
     }
@@ -246,5 +260,73 @@ export const aiManager = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fallback(titulo, nicho) {
-  return `${titulo}\n\n#${nicho.replace(/\s+/g, '')} #viral #reels #conteudo #brasil`
+  const tag = (nicho || 'conteudo').replace(/\s+/g, '').toLowerCase()
+  return `${titulo}\n\n#${tag} #viral #reels #brasil #fyp`
+}
+
+// v1.2.3: remove placeholders e loops do Qwen 0.5B
+// Hashtags como "#Nome de Pessoa", "#Nome de Jogador" sao templates abstratos —
+// a IA copia literalmente nossos exemplos do prompt. Detecta e remove.
+// Palavras genericas que Qwen 0.5B usa em hashtags placeholder
+const PLACEHOLDER_WORDS = [
+  'nome', 'nomes', 'tema', 'temas', 'conteudo', 'conteudos',
+  'seo', 'situacao', 'situacoes', 'lugar', 'lugares',
+  'artista', 'artistas', 'jogador', 'jogadores', 'cantor', 'cantores',
+  'pessoa', 'pessoas', 'reel', 'reels', 'placeholder', 'placeholders',
+  'geral', 'xx', 'xxx', 'yyy', 'zzz',
+]
+// Hashtag inteira que comeca com palavra-placeholder (ignora acentos pra match)
+const PLACEHOLDER_HASHTAG_RX = new RegExp(
+  '#(?:' + PLACEHOLDER_WORDS.join('|') + ')(?=\\W|$)',
+  'giu'
+)
+
+function unaccent(s) {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '')
+}
+
+function stripPlaceholders(text) {
+  if (!text) return text
+  let t = String(text)
+  // 1) Remove sequencia "#Nome de XX" / "#Nome do XX"
+  t = t.replace(/#Nome\s+(?:de|do|da)\s+\w+/gi, '')
+  t = t.replace(/#Tema\s+\w*/gi, '')
+  // 2) Tira hashtags individuais que sao placeholder (compara ignorando acentos)
+  t = t.replace(/#[A-Za-zÀ-ÿ_]+/g, (h) => {
+    const word = unaccent(h.slice(1)).toLowerCase()
+    return PLACEHOLDER_WORDS.includes(word) ? '' : h
+  })
+  // 3) Remove residuos tipo "de Conteúdo Geral", "de XXX" sozinhos (fragmentos sem hashtag pai)
+  t = t.replace(/\b(de|do|da|dos|das)\s+(Conteudo|Conteúdo|Tema|Geral|SEO|Lugar|Lugares|Situacao|Situação|Situacoes|Situações|Artista|Artistas|Pessoa|Pessoas|Jogador|Jogadores|Cantor|Cantores|Nome|Nomes)(\s+(Geral|Pessoa|Lugar|Tema|Situa[çc][ãa]o))?/gi, '')
+  // 4) Detecta loop: mesma hashtag se repete 2+ vezes -> corta a partir da 1a repeticao
+  const tags = t.match(/#[\w]+/g) || []
+  const seen = new Map()
+  for (let i = 0; i < tags.length; i++) {
+    const key = tags[i].toLowerCase()
+    const n = (seen.get(key) || 0) + 1
+    seen.set(key, n)
+    if (n >= 2) {
+      const firstIdx = t.toLowerCase().indexOf(key)
+      const secondIdx = t.toLowerCase().indexOf(key, firstIdx + key.length)
+      if (secondIdx > firstIdx) { t = t.slice(0, secondIdx).trimEnd(); break }
+    }
+  }
+  // 5) Compacta espaços/quebra de linhas
+  t = t.replace(/[ \t]{2,}/g, ' ').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+  return t
+}
+
+function isMostlyPlaceholder(text) {
+  if (!text) return true
+  // Conta hashtags REAIS (nao placeholder, e com pelo menos 3 chars)
+  const tags = text.match(/#[\w]+/g) || []
+  const realTags = tags.filter(h => {
+    const w = unaccent(h.slice(1)).toLowerCase()
+    return w.length >= 3 && !PLACEHOLDER_WORDS.includes(w)
+  })
+  // Texto SEM hashtags
+  const real = text.replace(/#[\w]+/g, '').trim()
+  // Considera placeholder se sobrou pouco conteudo real
+  if (real.length < 10 && realTags.length < 3) return true
+  return false
 }
