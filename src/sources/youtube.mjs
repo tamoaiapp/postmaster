@@ -8,7 +8,7 @@ import fs from 'fs'
 import path from 'path'
 import ffmpegStaticOriginal from 'ffmpeg-static'
 import sharp from 'sharp'
-import { getVideoDimensions } from '../videoEditor.mjs'
+import { getVideoDimensions } from '../faceTrack.mjs'
 
 const execAsync = promisify(exec)
 
