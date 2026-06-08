@@ -37,7 +37,15 @@ function saveState(file, state) {
 export async function buscarVideoTiktok(handles, stateFile, log, filtros = {}, dataDir = null, jobId = null) {
   const { minDur = 5, maxDur = 600, maxVideos = 10, keywordInclude = '', keywordExclude = '', onlyNew = true } = filtros
 
-  const lista = handles.split(/[,\n]/).map(h => h.trim().replace(/^@/, '')).filter(Boolean)
+  // v1.2.1: aceita URL completa (tiktok.com/@handle), com @, ou so o handle
+  const lista = handles.split(/[,\n]/).map(h => {
+    let s = h.trim()
+    if (!s) return ''
+    s = s.replace(/^https?:\/\/(www\.)?(vm\.|m\.)?tiktok\.com\//i, '')
+    s = s.replace(/^@/, '')
+    s = s.split(/[\/?#]/)[0]
+    return s
+  }).filter(Boolean)
   if (!lista.length) throw new Error('Nenhum perfil de TikTok configurado')
 
   const state = onlyNew ? loadState(stateFile) : { postados: [], falhou: [] }

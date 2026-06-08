@@ -48,7 +48,20 @@ function getInstagramSessionFile(dataDir) {
 export async function buscarVideoInstagram(handles, stateFile, log, filtros = {}, dataDir = null, jobId = null) {
   const { maxVideos = 10, keywordInclude = '', keywordExclude = '', onlyNew = true } = filtros
 
-  const lista = handles.split(/[,\n]/).map(h => h.trim().replace(/^@/, '')).filter(Boolean)
+  // v1.2.1: aceita URL completa (instagram.com/handle/), com @, ou so o handle.
+  // Antes: split -> trim -> remove @ inicial. Se user colava URL completa o handle ficava
+  // "https://www.instagram.com/exhumia.ai/" e o GET batia em /reels/reels/ = 404.
+  const lista = handles.split(/[,\n]/).map(h => {
+    let s = h.trim()
+    if (!s) return ''
+    // Tira protocolo + dominio se for URL completa
+    s = s.replace(/^https?:\/\/(www\.)?(instagram\.com|m\.instagram\.com)\//i, '')
+    // Tira @ inicial
+    s = s.replace(/^@/, '')
+    // Pega so a primeira parte antes de / ou ? (descarta /reels/, /reel/xyz, ?query)
+    s = s.split(/[\/?#]/)[0]
+    return s
+  }).filter(Boolean)
   if (!lista.length) throw new Error('Nenhum perfil de Instagram configurado')
 
   const sessionFile = dataDir ? getInstagramSessionFile(dataDir) : null
