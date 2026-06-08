@@ -50,37 +50,18 @@ extraResources:
     to: "ms-playwright/chromium_headless_shell-1223"
   - from: "ms-playwright/ffmpeg-1011"
     to: "ms-playwright/ffmpeg-1011"
-  # yt-dlp.exe — espelha o que estava em resources/bin/ no instalador v1.0.30
-  - from: "bin/yt-dlp.exe"
-    to: "bin/yt-dlp.exe"
-  # deno.exe — runtime JS que o yt-dlp usa pra resolver o "n challenge" do YouTube.
-  # Sem ele yt-dlp falha com "Requested format not available" / "Only images are
-  # available for download" e o app mostra "0 candidatos". Esqueci de incluir do
-  # v1.0.31 ate v1.0.34, clientes nao conseguiam baixar de YT desde a recuperacao.
-  - from: "bin/deno.exe"
-    to: "bin/deno.exe"
-  # v1.1.8: Pipeline de dublagem PT-BR local — Whisper.cpp + Piper TTS + Qwen (traducao)
-  # bin/ inteiro: whisper-cli.exe + DLLs (ggml, blas, openblas etc) + ggml-base.bin + piper/
-  - from: "bin/whisper-cli.exe"
-    to: "bin/whisper-cli.exe"
-  - from: "bin/ggml-base.bin"
-    to: "bin/ggml-base.bin"
-  - from: "bin/ggml.dll"
-    to: "bin/ggml.dll"
-  - from: "bin/ggml-base.dll"
-    to: "bin/ggml-base.dll"
-  - from: "bin/ggml-blas.dll"
-    to: "bin/ggml-blas.dll"
-  - from: "bin/ggml-cpu.dll"
-    to: "bin/ggml-cpu.dll"
-  - from: "bin/libopenblas.dll"
-    to: "bin/libopenblas.dll"
-  - from: "bin/SDL2.dll"
-    to: "bin/SDL2.dll"
-  - from: "bin/whisper.dll"
-    to: "bin/whisper.dll"
-  - from: "bin/piper"
-    to: "bin/piper"
+  # v1.2.4: bin/ inteiro num glob - antes era arquivo-por-arquivo e o
+  # electron-builder pulava silenciosamente os que nao existiam (ex: o CI baixava
+  # ggml-small.bin mas o yml referenciava ggml-base.bin -> instalador sem Whisper)
+  # Inclui:
+  # - yt-dlp.exe, deno.exe
+  # - whisper-cli.exe + DLLs (qualquer nome - varia por release do whisper.cpp)
+  # - ggml-*.bin (small ou base, o que o CI baixar)
+  # - piper/piper.exe + vozes pt_BR-faber/cadu + dicionarios espeak-ng
+  - from: "bin"
+    to: "bin"
+    filter:
+      - "**/*"
   # Modelo de face (fase 2). main.js copia daqui pra userData no boot.
   - from: "models/face-detector.onnx"
     to: "models/face-detector.onnx"
