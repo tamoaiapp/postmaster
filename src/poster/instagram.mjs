@@ -217,21 +217,27 @@ export async function postReelInstagram({ account, videoPath, caption, dataDir, 
     liveView.updateStatus(liveJobId, 'Enviando vídeo')
 
     // 4. Tenta clicar em "Selecionar do computador" se ainda existir
+    // v1.2.2: el.click() sintetico nao dispara onClick React do IG. Usa Playwright
+    // page.locator().click() que simula mouse real (down/up/event bubble) e o IG
+    // entende como interacao humana, disparando o filechooser.
     log('Procurando "Selecionar do computador"...')
-    const uploadBtn = await page.evaluate(() => {
-      const variants = ['Selecionar do computador', 'Select from computer', 'Selecionar arquivos do computador', 'Select files from computer']
-      for (const v of variants) {
-        const target = v.toLowerCase()
-        for (const el of document.querySelectorAll('button, [role="button"], div[tabindex="0"], div[role="dialog"] *')) {
-          const txt = (el.textContent || '').trim().toLowerCase()
-          if (txt === target || (txt.startsWith(target.split(' ')[0]) && txt.length < 50)) {
-            try { el.click(); return v } catch {}
-          }
+    let uploadBtn = null
+    const variants = ['Selecionar do computador', 'Select from computer', 'Selecionar arquivos do computador', 'Select files from computer']
+    for (const v of variants) {
+      try {
+        const loc = page.locator(`role=button[name="${v}"], button:has-text("${v}"), [role="button"]:has-text("${v}")`).first()
+        if (await loc.count().catch(() => 0) > 0) {
+          await loc.click({ timeout: 4000, force: true }).catch(async () => {
+            // Fallback: pega o elemento e click via mouse coords
+            const box = await loc.boundingBox()
+            if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+          })
+          uploadBtn = v
+          break
         }
-      }
-      return null
-    }).catch(() => null)
-    if (uploadBtn) log(`   → "${uploadBtn}" clicado`)
+      } catch {}
+    }
+    if (uploadBtn) log(`   → "${uploadBtn}" clicado via Playwright`)
     else log('   → botão não encontrado, esperando filechooser por outro caminho')
 
     // 5. Aguarda filechooser (disparado pelo showOpenFilePicker polyfilled OU input nativo)
