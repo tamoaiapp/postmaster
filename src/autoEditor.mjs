@@ -47,6 +47,12 @@ export async function applyAutoEdit({
   videoPath, outputPath, vttPath, fromSec, toSec,
   ffmpegPath, modelPath, tmpDir, log,
   options = {},
+  // v1.3.3: applyAutoEdit antes ignorava watermark - jobs editMode=auto saiam SEM marca dagua
+  // mesmo o user configurando no wizard. Agora aplica drawtext (texto) ou overlay (imagem).
+  watermarkType,    // 'none' | 'text' | 'image'
+  watermarkText,    // ex: '@ai.tiago'
+  watermarkImagePath, // path absoluto pra png/jpg
+  watermarkPosition, // 'tl' | 't' | 'tr' | 'c' (sem 'b' por causa de IG/TT que cobrem rodape)
 }) {
   const { cutSilence = true, karaokeSubs = true, faceTrack = true } = options
   fs.mkdirSync(tmpDir, { recursive: true })
@@ -191,11 +197,56 @@ export async function applyAutoEdit({
   }
   if (assPath) {
     const assEscaped = assPath.replace(/\\/g, '/').replace(/:/g, '\\:')
-    filter += `;[stacked]subtitles='${assEscaped}':charenc=UTF-8[out]`
+    filter += `;[stacked]subtitles='${assEscaped}':charenc=UTF-8[wsub]`
   } else {
-    filter += `;[stacked]null[out]`
+    filter += `;[stacked]null[wsub]`
   }
-  const finalCmd = `"${ffmpegPath}" -y -i "${workingVideo}" -filter_complex "${filter}" -map "[out]" -map 0:a? -c:v libx264 -preset fast -crf 22 -c:a aac -b:a 128k -movflags +faststart "${outputPath}"`
+
+  // v1.3.3: Watermark (texto ou imagem) na posicao escolhida pelo user
+  // Posicoes (em 1080x1920):
+  //   tl = top-left   (40, 40)
+  //   t  = top-center (centro, 40)
+  //   tr = top-right  (1080-w-40, 40)
+  //   c  = center     (centro, centro)
+  const wmActive = (watermarkType === 'text' && watermarkText?.trim()) ||
+                   (watermarkType === 'image' && watermarkImagePath && fs.existsSync(watermarkImagePath))
+  let extraInputs = ''
+  if (wmActive) {
+    const pos = watermarkPosition || 'tl'
+    if (watermarkType === 'text') {
+      const txt = String(watermarkText).replace(/'/g, "\\'").replace(/:/g, '\\:').replace(/\\/g, '\\\\')
+      const fontSize = 48
+      // Coord:
+      // x: tl/t left=40, tr right=1080-tw-40 (tw = text_w), t = (1080-text_w)/2, c = centro
+      // y: tl/t/tr top=40, c centro
+      const xExpr = pos === 'tl' ? '40'
+                  : pos === 't'  ? '(w-text_w)/2'
+                  : pos === 'tr' ? 'w-text_w-40'
+                  : pos === 'c'  ? '(w-text_w)/2'
+                  : '40'
+      const yExpr = pos === 'c' ? '(h-text_h)/2' : '40'
+      filter += `;[wsub]drawtext=text='${txt}':fontcolor=white@0.92:fontsize=${fontSize}:borderw=3:bordercolor=black@0.7:x=${xExpr}:y=${yExpr}[out]`
+    } else if (watermarkType === 'image') {
+      // Imagem como input adicional (-i)
+      const imgPath = watermarkImagePath.replace(/\\/g, '/')
+      extraInputs = ` -i "${imgPath}"`
+      // Logo redimensionada a ~15% da largura (162 de 1080)
+      const xExpr = pos === 'tl' ? '40'
+                  : pos === 't'  ? '(W-w)/2'
+                  : pos === 'tr' ? 'W-w-40'
+                  : pos === 'c'  ? '(W-w)/2'
+                  : '40'
+      const yExpr = pos === 'c' ? '(H-h)/2' : '40'
+      filter += `;[1:v]scale=162:-1[wm];[wsub][wm]overlay=${xExpr}:${yExpr}[out]`
+    } else {
+      filter += `;[wsub]null[out]`
+    }
+    log?.(`   💧 Marca dagua aplicada: ${watermarkType} em ${pos}`)
+  } else {
+    filter += `;[wsub]null[out]`
+  }
+
+  const finalCmd = `"${ffmpegPath}" -y -i "${workingVideo}"${extraInputs} -filter_complex "${filter}" -map "[out]" -map 0:a? -c:v libx264 -preset fast -crf 22 -c:a aac -b:a 128k -movflags +faststart "${outputPath}"`
   await execAsync(finalCmd, { timeout: 900000, windowsHide: true, maxBuffer: 64 * 1024 * 1024 })
 
   // Cleanup

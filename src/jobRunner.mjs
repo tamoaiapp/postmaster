@@ -215,6 +215,11 @@ export default async function jobRunner(job, dataDir, log) {
             karaokeSubs: job.editKaraokeSubs !== false,
             faceTrack:   job.editFaceTrack   !== false,
           },
+          // v1.3.3: passa watermark - antes applyAutoEdit ignorava
+          watermarkType: job.watermarkType,
+          watermarkText: job.watermarkText,
+          watermarkImagePath: job.watermarkImagePath,
+          watermarkPosition: job.watermarkPosition,
         })
         try { fs.unlinkSync(videoPath) } catch {}
         // Limpa VTT do smartCut

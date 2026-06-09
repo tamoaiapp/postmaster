@@ -123,17 +123,40 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
     // que aparece apos o upload eh removido pelo dispensarOverlays() chamado
     // mais abaixo (linha ~155), entao nao tem prejuizo.
 
-    // Upload file — TikTok esconde o input com display:none, mas Playwright
-    // setInputFiles funciona em elementos hidden. waitForSelector default espera
-    // visivel, entao usa state:'attached' pra aceitar hidden tambem.
+    // Upload file — v1.3.4: TikTok mudou a UI, input agora vive num IFRAME
+    // (creator#/upload), nao mais no DOM principal. page.waitForSelector
+    // procurava so na pagina principal -> achava 0 inputs -> bot reportava
+    // "postado" sem postar.
+    // Fix: itera por TODOS os frames (page.frames()) ate achar input[type=file]
     liveView.updateStatus(liveJobId, 'Enviando vídeo')
-    // Timeout 60s — TikTok Studio as vezes demora muito quando ha varios uploads em paralelo
-    const fileInput = await page.waitForSelector('input[type="file"]', {
-      state: 'attached',
-      timeout: 60000,
-    })
+
+    let fileInput = null
+    let frameComInput = null
+    const deadline = Date.now() + 90000  // 90s total
+    while (Date.now() < deadline && !fileInput) {
+      // Procura em todos os frames (incluindo o iframe do creator)
+      for (const f of page.frames()) {
+        try {
+          const inp = await f.$('input[type="file"]')
+          if (inp) { fileInput = inp; frameComInput = f; break }
+        } catch {}
+      }
+      if (fileInput) break
+      await delay(2000)
+    }
+    if (!fileInput) {
+      log('   ⚠️ Frames vistos:')
+      page.frames().forEach(f => log('     - ' + f.url().slice(0, 80)))
+      throw new Error('input[type=file] nao achado em nenhum frame (TikTok pode estar bloqueando bot)')
+    }
+    log(`   📎 input achado no frame: ${frameComInput.url().slice(0, 80)}`)
     await fileInput.setInputFiles(videoPath)
     log('📎 Arquivo selecionado')
+
+    // v1.3.4: usa o frame onde o input vive pra TODAS as operacoes seguintes
+    // (legenda, botao Publicar, overlays). Antes usava page (DOM principal) e
+    // nao achava elementos que vivem dentro do iframe creator#/upload.
+    const tikPage = frameComInput
     await delay(3000)
 
     // ROOT CAUSE (descoberto pelo user em 2026-06-05): o upload terminar de
