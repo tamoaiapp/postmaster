@@ -201,6 +201,28 @@ if (-not $criar) {
     List-UIA-Elements "Button"
     throw "Botao 'Criar' nao achado via UIA"
 }
+
+# v1.3.10: dispensa overlays/tour do YT Studio que aparecem em primeira visita
+# Bloqueava o menu do Criar - botoes 'Dispensar', 'Mostrar opcoes', 'Confira aqui'
+# do tour ficavam sobrepostos e o menu nao abria.
+Write-Host "  dispensando tour overlays (Dispensar, Fechar)..."
+$rootDis = Get-RootAE
+foreach ($el in $rootDis.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+    try {
+        if ($el.Current.IsOffscreen) { continue }
+        $n = $el.Current.Name
+        if ($n -match '^(Dispensar|Got it|Entendi|Pular|Skip|Close|Fechar tour)$') {
+            $ip = $null
+            if ($el.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$ip)) {
+                $ip.Invoke()
+                Write-Host "    dispensei: '$n'"
+                Start-Sleep -Milliseconds 400
+            }
+        }
+    } catch {}
+}
+Start-Sleep -Milliseconds 800
+
 Click-UIA $criar "Criar"
 Start-Sleep -Seconds 2
 Snap "02-after-criar"
@@ -215,15 +237,18 @@ $popupBtn = $null
 foreach ($strat in $strategies) {
     Write-Host "  tentando estrategia: $strat"
 
-    # Garante que menu Criar esta aberto (reabre se preciso)
-    $enviar = Find-UIA-Like "Enviar videos" "Button" 2000
+    # v1.3.10: busca "Enviar" em QUALQUER ControlType (MenuItem, Button, ListItem)
+    # YT mudou tipo do menu item entre updates - antes "Button" agora pode ser MenuItem.
+    $enviar = Find-UIA-Like "Enviar v" "" 2000
+    if (-not $enviar) { $enviar = Find-UIA-Like "Enviar" "" 1500 }
     if (-not $enviar) {
         Write-Host "    menu fechado - reabrindo Criar..."
         $criar2 = Find-UIA "Criar" "Button" 5000
         if (-not $criar2) { Write-Host "    Criar nao achado - skip"; continue }
         Click-UIA $criar2 "Criar (re-abrir)"
         Start-Sleep -Milliseconds 1500
-        $enviar = Find-UIA-Like "Enviar videos" "Button" 3000
+        $enviar = Find-UIA-Like "Enviar v" "" 3000
+        if (-not $enviar) { $enviar = Find-UIA-Like "Enviar" "" 1500 }
     }
     if (-not $enviar) { Write-Host "    Enviar nao achado - skip"; continue }
 
