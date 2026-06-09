@@ -563,16 +563,35 @@ foreach ($e in $rootAE.FindAll([System.Windows.Automation.TreeScope]::Descendant
 }
 if ($ainda) {
     Write-Host "  Modal de confirmacao detectado - procurando botao 'Publicar mesmo assim' via UIA"
-    # v1.3.3: Descobri no log que YT EXPOE "Publicar mesmo assim" como UIA element
-    # com nome exato. Antes chutava coord (centro+25, centro+145) e errava 40px Y.
-    # Agora acha por nome e usa o rect REAL do botao.
+    # v1.3.10: busca com retry + match flexivel + fallback no desktop root.
+    # Antes: busca unica no window (Get-RootAE) com nome exato - falhava se modal
+    # renderiza em shadow DOM ou se nome tem espaco extra.
     $btnConfirm = $null
-    foreach ($e in $rootAE.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
-        try {
-            if ($e.Current.IsOffscreen) { continue }
-            $n = $e.Current.Name
-            if ($n -and $n -eq 'Publicar mesmo assim') { $btnConfirm = $e; break }
-        } catch {}
+    $desktopRoot = [System.Windows.Automation.AutomationElement]::RootElement
+    $confirmDeadline = (Get-Date).AddSeconds(8)
+    while ((Get-Date) -lt $confirmDeadline -and -not $btnConfirm) {
+        # 1) Procura no window do hwnd (mais rapido)
+        foreach ($e in $rootAE.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+            try {
+                if ($e.Current.IsOffscreen) { continue }
+                $n = $e.Current.Name
+                if ($n -and ($n -match '(?i)publicar mesmo assim|publish anyway|publish anyway')) {
+                    $btnConfirm = $e; break
+                }
+            } catch {}
+        }
+        if ($btnConfirm) { break }
+        # 2) Fallback: busca no desktop root inteiro (modal pode estar em janela popup separada)
+        foreach ($e in $desktopRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+            try {
+                if ($e.Current.IsOffscreen) { continue }
+                $n = $e.Current.Name
+                if ($n -and ($n -match '(?i)publicar mesmo assim|publish anyway')) {
+                    $btnConfirm = $e; break
+                }
+            } catch {}
+        }
+        if (-not $btnConfirm) { Start-Sleep -Milliseconds 800 }
     }
     if ($btnConfirm) {
         $r = $btnConfirm.Current.BoundingRectangle
