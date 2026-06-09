@@ -132,8 +132,8 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
 
     let fileInput = null
     let frameComInput = null
-    const deadline = Date.now() + 90000  // 90s total
-    while (Date.now() < deadline && !fileInput) {
+    const inputDeadline = Date.now() + 90000  // 90s total
+    while (Date.now() < inputDeadline && !fileInput) {
       // Procura em todos os frames (incluindo o iframe do creator)
       for (const f of page.frames()) {
         try {
