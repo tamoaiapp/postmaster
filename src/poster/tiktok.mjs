@@ -20,7 +20,7 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
   // bloqueia o upload silenciosamente — provado isolando em teste local.
   // main.js seta PLAYWRIGHT_BROWSERS_PATH apontando pro chromium-XXXX bundlado.
   const browser = await chromium.launch({
-    headless: true,
+    headless: process.env.PM_HEADLESS === 'false' ? false : true,
     args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
   })
   const ctx = await browser.newContext({
@@ -177,7 +177,7 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
     log(`⏳ Aguardando TikTok processar (timeout ${Math.round(timeoutMs/60000)}min)...`)
     liveView.updateStatus(liveJobId, 'TikTok processando')
     try {
-      await page.waitForFunction(() => {
+      await tikPage.waitForFunction(() => {
         const el = document.querySelector('[data-e2e="post_video_button"], [data-e2e="publish-button"], [data-e2e*="post_video"]')
         if (!el) return false
         if (el.disabled || el.getAttribute('aria-disabled') === 'true') return false
@@ -250,7 +250,7 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
     // Caption — usa locator com force pra ignorar overlays que tenham re-aparecido
     // (o joyride do TikTok volta via re-render do React mesmo apos el.remove())
     await dispensarOverlays()
-    const captionLoc = page.locator('[data-text="true"], [contenteditable="true"], textarea[placeholder]').first()
+    const captionLoc = tikPage.locator('[data-text="true"], [contenteditable="true"], textarea[placeholder]').first()
     if (await captionLoc.count() > 0) {
       try {
         await captionLoc.click({ force: true, timeout: 10000 })
@@ -277,10 +277,12 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
     ]
     let posted = false
     const MAX_ATTEMPTS = 5
+    // v1.3.7: TikTok poe quase tudo num iframe (creator#/upload). Usa tikPage (frame)
+    // pra encontrar overlays + post button. page.evaluate na main page nao funciona.
     for (let tentativa = 1; tentativa <= MAX_ATTEMPTS && !posted; tentativa++) {
       try {
         // 1. Limpa overlays + scroll pro fim (botao fica em y~1145, fora da viewport 900)
-        await page.evaluate(() => {
+        await tikPage.evaluate(() => {
           document.querySelectorAll('[data-floating-ui-portal], #react-joyride-portal, #react-joyride__portal').forEach(el => {
             try { el.remove() } catch {}
           })
@@ -290,26 +292,16 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
         }).catch(() => {})
         await delay(1200)
 
-        // 2. Aguarda upload terminar — detecta progresso visivel
-        const uploadInProgress = await page.evaluate(() => {
-          const text = (document.body.innerText || '').toLowerCase()
-          if (/uploading.*\d+%|carregando.*\d+%|loading\s*\d+%/.test(text)) return true
-          if (/\b(uploading|carregando|fazendo upload)\b/.test(text) && !/upload(ed|ado|ou)/.test(text)) return true
-          return false
-        })
-        if (uploadInProgress) {
-          log(`   tentativa ${tentativa}: upload ainda em andamento, aguardando 5s...`)
-          await delay(5000)
-          continue
-        }
+        // v1.3.7: removido check uploadInProgress que travava em loop.
+        // Ja esperamos post_video_button aparecer antes (waitForFunction acima),
+        // entao se chegamos aqui, upload terminou.
 
-        // 3. Tenta cada seletor data-e2e via Playwright locator (handle robusto)
+        // 3. Tenta cada seletor data-e2e via Playwright locator no FRAME
         let btn = null
         let usedSelector = null
         for (const sel of POST_SELECTORS) {
-          const loc = page.locator(sel).first()
+          const loc = tikPage.locator(sel).first()
           if (await loc.count() > 0) {
-            // Confere se nao esta disabled (botao pode existir mas estar inativo)
             const disabled = await loc.evaluate(el => el.disabled || el.getAttribute('aria-disabled') === 'true').catch(() => false)
             if (!disabled) {
               btn = loc

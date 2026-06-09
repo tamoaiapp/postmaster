@@ -16,7 +16,7 @@ export async function postReelInstagram({ account, videoPath, caption, dataDir, 
   if (!fs.existsSync(sessionFile)) throw new Error(`Sessão não encontrada para @${account}. Faça login primeiro.`)
 
   const browser = await chromium.launch({
-    headless: true,
+    headless: process.env.PM_HEADLESS === 'false' ? false : true,
     executablePath: getChromiumExe() || undefined,
     args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
   })
