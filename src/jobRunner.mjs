@@ -202,6 +202,17 @@ export default async function jobRunner(job, dataDir, log) {
           log(`⚠️ Modelo face não encontrado em ${modelPath} — fallback pro modo original`)
           throw new Error('face-detector.onnx ausente')
         }
+        // v1.3.9: gera chyron via IA se job.useChyron === true
+        let chyronText = null
+        if (job.useChyron) {
+          try {
+            const { gerarChyron } = await import('./aiManager.mjs')
+            chyronText = await gerarChyron(videoMeta.titulo || '', '', job.captionNiche || '')
+            log(`   📰 Chyron gerado: "${chyronText}"`)
+          } catch (e) {
+            log(`   ⚠️ Chyron falhou: ${e.message.slice(0, 60)} — pulando`)
+          }
+        }
         reelPath = await applyAutoEdit({
           videoPath, outputPath: outPath,
           vttPath: cutRange?.vttPath || null,
@@ -220,6 +231,8 @@ export default async function jobRunner(job, dataDir, log) {
           watermarkText: job.watermarkText,
           watermarkImagePath: job.watermarkImagePath,
           watermarkPosition: job.watermarkPosition,
+          // v1.3.9: chyron manchete (texto branco bold sobre faixa preta)
+          chyronText,
         })
         try { fs.unlinkSync(videoPath) } catch {}
         // Limpa VTT do smartCut

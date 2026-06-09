@@ -53,6 +53,9 @@ export async function applyAutoEdit({
   watermarkText,    // ex: '@ai.tiago'
   watermarkImagePath, // path absoluto pra png/jpg
   watermarkPosition, // 'tl' | 't' | 'tr' | 'c' (sem 'b' por causa de IG/TT que cobrem rodape)
+  // v1.3.9: chyron estilo manchete - texto branco bold sobre fundo preto
+  // centralizado horizontal, posicao upper-middle. Tipo G1/TV news.
+  chyronText,       // ex: '"ODEIO HOMENS BONITOS!", DIZ TRUMP AO CUMPRIMENTAR GRADUADO DA GUARDA COSTEIRA'
 }) {
   const { cutSilence = true, karaokeSubs = true, faceTrack = true } = options
   fs.mkdirSync(tmpDir, { recursive: true })
@@ -225,7 +228,7 @@ export async function applyAutoEdit({
                   : pos === 'c'  ? '(w-text_w)/2'
                   : '40'
       const yExpr = pos === 'c' ? '(h-text_h)/2' : '40'
-      filter += `;[wsub]drawtext=text='${txt}':fontcolor=white@0.92:fontsize=${fontSize}:borderw=3:bordercolor=black@0.7:x=${xExpr}:y=${yExpr}[out]`
+      filter += `;[wsub]drawtext=text='${txt}':fontcolor=white@0.92:fontsize=${fontSize}:borderw=3:bordercolor=black@0.7:x=${xExpr}:y=${yExpr}[wmout]`
     } else if (watermarkType === 'image') {
       // Imagem como input adicional (-i)
       const imgPath = watermarkImagePath.replace(/\\/g, '/')
@@ -237,13 +240,62 @@ export async function applyAutoEdit({
                   : pos === 'c'  ? '(W-w)/2'
                   : '40'
       const yExpr = pos === 'c' ? '(H-h)/2' : '40'
-      filter += `;[1:v]scale=162:-1[wm];[wsub][wm]overlay=${xExpr}:${yExpr}[out]`
+      filter += `;[1:v]scale=162:-1[wm];[wsub][wm]overlay=${xExpr}:${yExpr}[wmout]`
     } else {
-      filter += `;[wsub]null[out]`
+      filter += `;[wsub]null[wmout]`
     }
     log?.(`   💧 Marca dagua aplicada: ${watermarkType} em ${pos}`)
   } else {
-    filter += `;[wsub]null[out]`
+    filter += `;[wsub]null[wmout]`
+  }
+
+  // v1.3.9: Chyron estilo manchete (texto branco bold sobre faixa PRETA SÓLIDA).
+  // Posicao ligeiramente abaixo do centro (~y=1080 de 1920), centralizado.
+  // Auto-split em ate 3 linhas pra nao estourar 1080px de largura.
+  if (chyronText?.trim()) {
+    const raw = String(chyronText).replace(/["'`]/g, '').toUpperCase().trim()
+    // Wrap em ~22 chars - cabe em ~880px com fontsize 58 e margem esquerda 50
+    const MAX_PER_LINE = 22
+    const words = raw.split(/\s+/)
+    const lines = []
+    let cur = ''
+    for (const w of words) {
+      if ((cur + ' ' + w).trim().length > MAX_PER_LINE && cur) {
+        lines.push(cur.trim())
+        cur = w
+      } else {
+        cur = (cur + ' ' + w).trim()
+      }
+    }
+    if (cur) lines.push(cur.trim())
+
+    const esc = s => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/:/g, '\\:').replace(/,/g, '\\,')
+    const chFs = 58
+    const chBorder = 22
+    const lineH = chFs + 28
+    const blockH = lines.length * lineH
+    // Bloco centralizado VERTICALMENTE (960 = meio do 1920)
+    const startY = Math.floor(960 - blockH / 2)
+    // Bloco centralizado HORIZONTALMENTE usando a linha MAIS LONGA como referencia.
+    // Todas linhas iniciam no MESMO X (alinhamento esquerda dentro do bloco), mas
+    // o bloco como um todo fica centrado no video.
+    const maxChars = Math.max(...lines.map(l => l.length))
+    const approxLongestW = Math.floor(maxChars * chFs * 0.55) + (2 * chBorder)
+    const chX = Math.max(50, Math.floor((1080 - approxLongestW) / 2))
+
+    let chyronF = ''
+    let prevLabel = 'wmout'
+    lines.forEach((line, i) => {
+      const isLast = i === lines.length - 1
+      const nextLabel = isLast ? 'out' : `ch${i}`
+      const y = startY + (i * lineH)
+      chyronF += `;[${prevLabel}]drawtext=text='${esc(line)}':fontcolor=white:fontsize=${chFs}:box=1:boxcolor=black:boxborderw=${chBorder}:x=${chX}:y=${y}[${nextLabel}]`
+      prevLabel = nextLabel
+    })
+    filter += chyronF
+    log?.(`   📰 Chyron (${lines.length} linhas): "${raw.slice(0, 60)}${raw.length > 60 ? '...' : ''}"`)
+  } else {
+    filter += `;[wmout]null[out]`
   }
 
   const finalCmd = `"${ffmpegPath}" -y -i "${workingVideo}"${extraInputs} -filter_complex "${filter}" -map "[out]" -map 0:a? -c:v libx264 -preset fast -crf 22 -c:a aac -b:a 128k -movflags +faststart "${outputPath}"`

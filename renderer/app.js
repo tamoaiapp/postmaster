@@ -1026,6 +1026,17 @@ function getWizardBody(step) {
         </div>` : ''}
 
       <div class="filter-section">
+        <div class="filter-section-title">📰 Manchete IA na tela (opcional)</div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label class="form-check" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="wiz-chyron" ${wizardData.useChyron?'checked':''} onchange="wizardData.useChyron=this.checked">
+            <span>Adicionar manchete branca/preta no meio do vídeo</span>
+          </label>
+          <span class="text-sm text-muted">A IA gera uma frase curta estilo G1/CNN baseada no título. Aparece centralizada upper-middle do vídeo. Bom pra notícia/viral.</span>
+        </div>
+      </div>
+
+      <div class="filter-section">
         <div class="filter-section-title">💧 Marca d'água (opcional)</div>
         <div class="form-group" style="margin-bottom:12px">
           <label>Tipo</label>

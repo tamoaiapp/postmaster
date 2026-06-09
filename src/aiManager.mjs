@@ -212,6 +212,62 @@ Responda SO a legenda final. Sem prefixo, sem aspas.`
 
 // ── Status ────────────────────────────────────────────────────────────────────
 
+// ── Chyron / Manchete ────────────────────────────────────────────────────────
+// v1.3.9: gera headline curto estilo G1/CNN pra mostrar overlay no video.
+// Output: 1 frase ALL-CAPS, max 65 chars (~2 linhas de chyron)
+export async function gerarChyron(titulo, transcricao = '', nicho = '') {
+  if (!_model) {
+    // Fallback: usa titulo cru (uppercased, truncado)
+    return String(titulo || '').toUpperCase().slice(0, 60)
+  }
+  const { LlamaChatSession } = await import('node-llama-cpp')
+  const tituloLimpo = stripForbiddenOutlets(titulo || '').trim() || titulo
+  const ctx = transcricao ? `\nPrimeiras frases do video: "${String(transcricao).slice(0, 300)}"` : ''
+
+  const prompt = `Voce e editor de manchete de noticia/viral PT-BR.
+Crie UMA frase de ate 60 caracteres, ALL CAPS, estilo manchete G1/CNN.
+
+REGRAS:
+- 1 unica frase, sem aspas, sem comentarios.
+- Use o assunto principal do video.
+- Tom dramatico (atrai click) mas sem mentir.
+- NUNCA cite jornal/canal/portal (mesmas restricoes da legenda).
+- Pode citar pessoa publica, lugar, tema.
+
+Titulo original: "${tituloLimpo}"${nicho ? '\nNicho: ' + nicho : ''}${ctx}
+
+MANCHETE:`
+
+  const run = async () => {
+    const c = await _model.createContext({ contextSize: 1024 })
+    const session = new LlamaChatSession({ contextSequence: c.getSequence() })
+    try {
+      let texto = await session.prompt(prompt, { maxTokens: 80, temperature: 0.6 })
+      texto = texto.trim()
+      // Strip prefixos comuns
+      texto = texto.replace(/^(MANCHETE|HEADLINE|TITULO|RESPOSTA)[^:]*:\s*/i, '')
+      // Pega so a 1a linha
+      texto = texto.split(/\n/)[0].trim()
+      // Tira aspas
+      texto = texto.replace(/^["'""]+|["'""]+$/g, '').trim()
+      // Strip veiculos imprensa
+      texto = stripForbiddenOutlets(texto).trim()
+      // Limita 65 chars
+      if (texto.length > 65) {
+        const cut = texto.lastIndexOf(' ', 65)
+        texto = (cut > 30 ? texto.slice(0, cut) : texto.slice(0, 65)) + ''
+      }
+      texto = texto.toUpperCase()
+      return texto || String(titulo || '').toUpperCase().slice(0, 60)
+    } finally {
+      c.dispose()
+    }
+  }
+  const next = _aiQueue.then(run).catch(() => String(titulo || '').toUpperCase().slice(0, 60))
+  _aiQueue = next.catch(() => {})
+  return next
+}
+
 export async function getStatus() {
   const valid = await modelIsValid()
   return {
