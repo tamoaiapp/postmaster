@@ -310,6 +310,63 @@ export async function postReelInstagram({ account, videoPath, caption, dataDir, 
     }
     await delay(1000)
 
+    // v1.3.7: Antes de Avançar, abre seletor de aspect ratio e clica "Original"
+    // (mantem 9:16 do video). Default do IG eh 1:1 que CORTA o video vertical.
+    log('Ajustando aspect ratio pra Original (9:16)...')
+    try {
+      // Botao de expansão do crop (aria-label "Selecionar opção de corte" ou similar)
+      // Ícone fica bottom-left do preview do video
+      const cropButtons = [
+        'svg[aria-label*="Selecionar"]',
+        'svg[aria-label*="recorte"]',
+        'svg[aria-label*="Select crop"]',
+        'svg[aria-label*="crop"]',
+        '[role="dialog"] button[aria-label*="Selecionar"]',
+        '[role="dialog"] button[aria-label*="Select"]',
+      ]
+      let opened = false
+      for (const sel of cropButtons) {
+        const loc = page.locator(sel).first()
+        if (await loc.count().catch(() => 0) > 0) {
+          // Click no parent button do SVG (SVG nao recebe click)
+          await loc.click({ force: true, timeout: 3000 }).catch(async () => {
+            const btn = await loc.elementHandle()
+            if (btn) {
+              const parent = await page.evaluateHandle(el => el.closest('button, [role="button"]'), btn)
+              if (parent) await parent.asElement()?.click({ force: true }).catch(() => {})
+            }
+          })
+          await delay(800)
+          opened = true
+          break
+        }
+      }
+      if (opened) {
+        // Agora seleciona "Original" (mantem o video como ta)
+        const originalLoc = page.locator('div[role="button"]:has-text("Original"), button:has-text("Original")').first()
+        if (await originalLoc.count().catch(() => 0) > 0) {
+          await originalLoc.click({ force: true, timeout: 3000 }).catch(() => {})
+          log('   → Original selecionado (9:16 mantido)')
+          await delay(1000)
+        } else {
+          // Fallback: 9:16 direto
+          const nineSix = page.locator('div[role="button"]:has-text("9:16"), button:has-text("9:16")').first()
+          if (await nineSix.count().catch(() => 0) > 0) {
+            await nineSix.click({ force: true, timeout: 3000 }).catch(() => {})
+            log('   → 9:16 selecionado')
+            await delay(1000)
+          } else {
+            log('   ⚠️ Botoes Original/9:16 nao achados — usando default')
+          }
+        }
+      } else {
+        log('   ⚠️ Botao de aspect nao achado — usando default IG')
+      }
+    } catch (e) {
+      log(`   ⚠️ Aspect select falhou: ${e.message.slice(0,60)}`)
+    }
+    await delay(800)
+
     // Avançar: Crop → Filtros → Caption (2 cliques de Next)
     await clickNext(page, log, 20000)
     await delay(2500)

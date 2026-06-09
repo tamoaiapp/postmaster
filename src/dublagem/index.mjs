@@ -33,9 +33,23 @@ export async function dublarVideo({ videoPath, outputPath, voice = 'homem', quei
 
   log('🎙️ [1/4] Transcrevendo audio original (Whisper local)...')
   const langWhisper = modoNarracao ? 'pt' : langOrigem
-  const segments = await transcreverVideo(videoPath, { lang: langWhisper, log })
-  if (segments.length === 0) throw new Error('Whisper nao retornou segmentos')
-  log(`   ${segments.length} segmentos transcritos`)
+  const segmentsRaw = await transcreverVideo(videoPath, { lang: langWhisper, log })
+  if (segmentsRaw.length === 0) throw new Error('Whisper nao retornou segmentos')
+
+  // v1.3.7: FILTRA segmentos de musica/silencio/efeito sonoro pra TTS nao
+  // gerar voz dizendo "Música, música, música" repetidamente. Whisper marca
+  // som ambiente como (Music), [Music], (Aplausos), etc.
+  const segments = segmentsRaw.filter(s => {
+    const t = (s.text || '').trim()
+    if (!t || t.length < 3) return false
+    // Parenteses ou colchetes envolvendo tudo (com ou sem espaço): (Music), [Música], (silence)
+    if (/^[\[\(].*[\]\)]\s*$/.test(t)) return false
+    // Texto que so tem palavras como Music/Música/silence/aplausos
+    const tLower = t.toLowerCase().replace(/[^\p{L}\s]/gu, '').trim()
+    if (/^(music|musica|música|silence|silêncio|silencio|applause|aplausos|sound|som|inaudible)$/i.test(tLower)) return false
+    return true
+  })
+  log(`   ${segments.length} segmentos transcritos (filtrei ${segmentsRaw.length - segments.length} musica/silencio)`)
 
   let traduzidos
   if (modoNarracao) {
