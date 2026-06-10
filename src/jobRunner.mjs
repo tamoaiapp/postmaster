@@ -525,6 +525,13 @@ export default async function jobRunner(job, dataDir, log) {
     } else {
       marcarPostado(stateFile, videoMeta.id)
     }
+  } else if (!ok && videoMeta.id) {
+    // v1.3.12: bot falhou na postagem mas video JA FOI uploadado (yt) ou processado
+    // (ig/tt). Marcar como FALHOU pra nao re-tentar mesmo video infinitamente.
+    // Antes: falha -> nao marcava nada -> proximo ciclo pegava mesmo video -> loop
+    // de upload do mesmo conteudo. User reportou "postando o mesmo video sempre".
+    log(`⚠️ Marca video como FALHOU (evita re-tentar mesmo conteudo no proximo ciclo)`)
+    try { marcarFalhou(stateFile, videoMeta.id) } catch (e) { log(`   marcarFalhou erro: ${e.message.slice(0,60)}`) }
   }
   return { posted: ok }
   } // fim de runJob()
