@@ -441,7 +441,12 @@ for ($i = 1; $i -le $maxAvancar; $i++) {
 
 # === STEP 9: Visibilidade Privado via SelectionItemPattern ===
 Write-Host "[9] Selecionando visibilidade '$Visibility' via SelectionItemPattern..."
-$visLabel = switch ($Visibility) { 'private' { 'Privado' } 'unlisted' { 'Nao listado' } 'public' { 'Publico' } default { 'Privado' } }
+# v1.3.18: 'public' usa 'Publicos' (plural com S) porque o radio no YT PT-BR se
+# chama "Públicos", nao "Público". Antes ficava 'Publico' (singular) e o match
+# por igualdade falhava -> caia no else "exato nao achado" -> rascunho ou
+# pior, video aparecia como Nao listado pq nada foi selecionado e YT
+# manteve o default (Nao listado quando algum aviso de verificacao ativa).
+$visLabel = switch ($Visibility) { 'private' { 'Privado' } 'unlisted' { 'Nao listado' } 'public' { 'Publicos' } default { 'Privado' } }
 # Procura RadioButton exato - NAO 'Salvo como privado' (que eh status)
 $visRadio = $null
 $allRadios = (Get-RootAE).FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::RadioButton)))
@@ -636,7 +641,43 @@ if ($ainda) {
         Snap "12-after-confirm"
         Write-Host "  Modal de confirmacao processado"
     } else {
-        Write-Host "  AVISO: 'Publicar mesmo assim' nao achado via UIA"
+        # v1.3.18: fallback por COORDENADA do bounds do modal $ainda.
+        # YT React renderiza "Publicar mesmo assim" em shadow DOM que nem sempre
+        # expoe Name via UIA. Antes desistia (= video ficava em rascunho).
+        # Agora calcula posicao dos botoes a partir do bounds do modal: botoes
+        # ocupam a faixa de ~30px no rodape; "Publicar mesmo assim" eh o da
+        # ESQUERDA (mais largo, "Voltar" eh menor a direita).
+        Write-Host "  AVISO: 'Publicar mesmo assim' nao achado via UIA - fallback COORD"
+        $mr = $ainda.Current.BoundingRectangle
+        if ($mr.Width -gt 50 -and $mr.Height -gt 50) {
+            # Botoes ficam alinhados a direita do modal, no rodape.
+            # Pos do botao "Publicar mesmo assim": ~75px a esquerda do botao "Voltar".
+            # Voltar fica em (Right - 50, Bottom - 30). Publicar mesmo assim em (Right - 150, Bottom - 30).
+            $px = [int]($mr.Right - 150)
+            $py = [int]($mr.Bottom - 30)
+            Write-Host "  modal rect=($([int]$mr.Left),$([int]$mr.Top))-($([int]$mr.Right),$([int]$mr.Bottom)) - click em ($px, $py)"
+            [W32]::SetCursorPos($px, $py) | Out-Null
+            Start-Sleep -Milliseconds 200
+            [W32]::mouse_event(0x0002, 0, 0, 0, 0)
+            Start-Sleep -Milliseconds 80
+            [W32]::mouse_event(0x0004, 0, 0, 0, 0)
+            Start-Sleep -Seconds 5
+            Snap "12-after-confirm-coord"
+            # Verifica se modal sumiu (sinal de sucesso)
+            $still = $null
+            try {
+                foreach ($e2 in (Get-RootAE).FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+                    try { if ($e2.Current.Name -match 'Ainda estamos verificando' -and -not $e2.Current.IsOffscreen) { $still = $e2; break } } catch {}
+                }
+            } catch {}
+            if (-not $still) {
+                Write-Host "  Modal confirmado e fechado - PUBLICADO de verdade!"
+            } else {
+                Write-Host "  AVISO: modal ainda aberto apos click coord - video pode ter ficado em rascunho"
+            }
+        } else {
+            Write-Host "  AVISO: bounds do modal invalido ($($mr.Width)x$($mr.Height)) - nao da pra calcular click"
+        }
     }
 } else {
     Write-Host "  Nenhum modal de confirmacao (verificacao ja completa OU video sem aviso)"
