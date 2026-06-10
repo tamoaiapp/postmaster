@@ -297,20 +297,31 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
         // entao se chegamos aqui, upload terminou.
 
         // 3. Tenta cada seletor data-e2e via Playwright locator no FRAME
+        // v1.3.14: TikTok mantem botao Publicar disabled enquanto processa cover/upload
+        // server-side. Antes: 5 tentativas em 12s sempre falhavam pq botao disabled.
+        // Agora: aguarda ate 5 MINUTOS pelo botao ficar ENABLED (post_video_button
+        // existe sempre, so muda disabled=true -> false quando upload pronto).
         let btn = null
         let usedSelector = null
-        for (const sel of POST_SELECTORS) {
-          const loc = tikPage.locator(sel).first()
-          if (await loc.count() > 0) {
-            const disabled = await loc.evaluate(el => el.disabled || el.getAttribute('aria-disabled') === 'true').catch(() => false)
-            if (!disabled) {
-              btn = loc
-              usedSelector = sel
-              break
+        const enableDeadline = Date.now() + 5 * 60 * 1000  // 5 min
+        while (Date.now() < enableDeadline && !btn) {
+          for (const sel of POST_SELECTORS) {
+            const loc = tikPage.locator(sel).first()
+            if (await loc.count() > 0) {
+              const disabled = await loc.evaluate(el => el.disabled || el.getAttribute('aria-disabled') === 'true').catch(() => false)
+              if (!disabled) {
+                btn = loc
+                usedSelector = sel
+                break
+              }
             }
           }
+          if (!btn) {
+            log(`   tentativa ${tentativa}: botao ainda disabled - aguardando upload server-side...`)
+            await delay(10000)  // 10s entre checagens
+          }
         }
-        if (!btn) throw new Error('Botão Post não encontrado (data-e2e ausente — TikTok pode ter mudado)')
+        if (!btn) throw new Error('Botão Post não ficou enabled em 5min (TikTok travado no processamento server-side)')
 
         // 4. Scroll + click
         log(`   tentativa ${tentativa}: achei via ${usedSelector}`)
