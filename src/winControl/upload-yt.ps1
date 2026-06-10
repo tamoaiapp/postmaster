@@ -479,6 +479,38 @@ if ($visRadio) {
     List-UIA-Elements "RadioButton"
 }
 
+# === STEP 9.5: Espera verificacao inicial do YT acabar ANTES de clicar Publicar ===
+# v1.3.19: ate v1.3.18, bot clicava Publicar mesmo com o YT ainda verificando o
+# upload (texto "Tempo restante: N minutos" no rodape do dialog). Resultado:
+# modal "Ainda estamos verificando" abria, e mesmo com o fallback de coord do
+# v1.3.18 pra clicar "Publicar mesmo assim", as vezes o YT salvava como
+# rascunho mesmo assim (observado: alguns videos saiam publicos, outros
+# Beat The Keeper / 100 Countries ficavam em rascunho).
+# Estrategia: aguarda o texto "minutos restantes" sumir (= verificacao concluida)
+# ou ate 12 min (safety). Re-checa a cada 15s. Se sumiu, segue pra Publicar.
+Write-Host "[9.5] Esperando YT terminar verificacao inicial do upload..."
+$verifDeadline = (Get-Date).AddMinutes(12)
+$lastSeen = $null
+$iter = 0
+while ((Get-Date) -lt $verifDeadline) {
+    $iter++
+    # Procura indicadores de verificacao em andamento
+    $hint = Find-UIA-Like "minutos restantes" $null 1500
+    if (-not $hint) { $hint = Find-UIA-Like "minutes remaining" $null 800 }
+    if (-not $hint) { $hint = Find-UIA-Like "minuto restante" $null 800 }  # singular ~ 1 min
+    if (-not $hint) { $hint = Find-UIA-Like "segundos restantes" $null 800 }  # final do countdown
+    if (-not $hint) {
+        Write-Host "  verificacao concluida (sem 'minutos/segundos restantes' visivel) - apos $iter check(s)"
+        break
+    }
+    $lastSeen = $hint.Current.Name
+    Write-Host "  [$iter] ainda verificando: '$lastSeen' - aguarda 15s"
+    Start-Sleep -Seconds 15
+}
+if ((Get-Date) -ge $verifDeadline) {
+    Write-Host "  AVISO: timeout 12min atingido com verificacao ainda em curso ('$lastSeen') - vou clicar Publicar mesmo assim (modal handler do step 11 cuida)"
+}
+
 # === STEP 10: Publicar (ou skip se -DryRun) ===
 if ($DryRun) {
     Write-Host "[10] DRY RUN - NAO clicando Publicar. Video fica como RASCUNHO pra inspecao."
