@@ -283,13 +283,25 @@ export async function applyAutoEdit({
     const approxLongestW = Math.floor(maxChars * chFs * 0.55) + (2 * chBorder)
     const chX = Math.max(50, Math.floor((1080 - approxLongestW) / 2))
 
+    // v1.3.16: fonte padrao do ffmpeg drawtext nao tem Ç, ã, ó etc - aparecem como
+    // quadrados pretos no chyron. Usa Arial Bold do Windows que tem suporte
+    // completo Latin Extended.
+    let chyronFontFile = ''
+    try {
+      const arialBd = 'C:/Windows/Fonts/arialbd.ttf'
+      if (fs.existsSync(arialBd)) {
+        // ffmpeg drawtext exige `:` escaped como `\:` e `\` como `/`
+        chyronFontFile = `:fontfile=C\\:/Windows/Fonts/arialbd.ttf`
+      }
+    } catch {}
+
     let chyronF = ''
     let prevLabel = 'wmout'
     lines.forEach((line, i) => {
       const isLast = i === lines.length - 1
       const nextLabel = isLast ? 'out' : `ch${i}`
       const y = startY + (i * lineH)
-      chyronF += `;[${prevLabel}]drawtext=text='${esc(line)}':fontcolor=white:fontsize=${chFs}:box=1:boxcolor=black:boxborderw=${chBorder}:x=${chX}:y=${y}[${nextLabel}]`
+      chyronF += `;[${prevLabel}]drawtext=text='${esc(line)}'${chyronFontFile}:fontcolor=white:fontsize=${chFs}:box=1:boxcolor=black:boxborderw=${chBorder}:x=${chX}:y=${y}[${nextLabel}]`
       prevLabel = nextLabel
     })
     filter += chyronF
