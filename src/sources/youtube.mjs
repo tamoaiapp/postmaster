@@ -231,7 +231,13 @@ export async function baixarVideoYoutube(video, downloadsDir, prefix, log, dataD
     log(`⬇️ Baixando VIDEO INTEIRO (sem range)...`)
   }
   await execAsync(
-    `${YTDLP} ${JS_RUNTIMES_ARG} ${await getYoutubeCookiesArg(log, dataDir)} --ffmpeg-location "${ffmpegDir}" ${sectionArg} -f "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 -o "${out}" "https://www.youtube.com/watch?v=${video.id}"`,
+    // v1.3.13: YouTube atualizou n-challenge em 2026-06-09 e yt-dlp DASH (720p+)
+    // ficou indisponivel sem o plugin EJS. Solucao: usa --extractor-args player_client=
+    // tv_embedded que NAO precisa de n-challenge e oferece formato 18 (mp4 360p combined)
+    // direto. Qualidade menor que antes mas funciona ate yt-dlp ter suporte ao novo
+    // challenge embutido.
+    // Sem cookies (tv_embedded nao precisa) e sem JS_RUNTIMES_ARG (tv_embedded skipa challenge)
+    `${YTDLP} --extractor-args "youtube:player_client=tv_embedded" --ffmpeg-location "${ffmpegDir}" ${sectionArg} -f "18/best[ext=mp4]/best" --merge-output-format mp4 -o "${out}" "https://www.youtube.com/watch?v=${video.id}"`,
     { timeout: 600000, windowsHide: true }
   )
 
