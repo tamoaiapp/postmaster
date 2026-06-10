@@ -114,7 +114,18 @@ export async function postVideoYouTube(opts) {
 
     ps.on('exit', code => {
       try { liveView.unregister(liveJobId) } catch {}
-      if (code === 0 && /PUBLICADO!/.test(output)) {
+      // v1.3.15: regex antiga /PUBLICADO!/ exigia exclamacao grudada na palavra
+      // mas o upload-yt.ps1 imprime "PUBLICADO (UIA)!", "PUBLICADO (coord geometrica)!"
+      // ou "Modal confirmado e fechado - PUBLICADO de verdade!" - todos com texto
+      // entre PUBLICADO e o !. Bot completava upload OK mas regex nao matchava ->
+      // marcarFalhou -> postCount=0 -> bot pegava mesmo video proximo ciclo.
+      // Aceita qualquer ocorrencia de PUBLICADO/Publicado/Modal de confirmacao processado.
+      const success = code === 0 && (
+        /PUBLICADO/i.test(output) ||
+        /Modal de confirmacao processado/i.test(output) ||
+        /Modal confirmado e fechado/i.test(output)
+      )
+      if (success) {
         log(`✅ Video publicado no YouTube`)
         resolve(true)
       } else {
