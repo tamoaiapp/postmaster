@@ -62,17 +62,33 @@ export async function postVideoYouTube(opts) {
   const psScript = path.join(scriptDir, 'upload-yt.ps1')
   if (!fs.existsSync(psScript)) throw new Error(`Script PS nao encontrado: ${psScript}`)
 
-  // v1.1.3: NAO forca channelId - usa o canal logado por padrao no Chrome do user.
-  // Forcar URL /channel/UCxxx pode dar 'Ops algo deu errado' se conta logada no
-  // Chrome nao tiver acesso aquele canal. Mais simples e robusto: deixa o Chrome
-  // abrir o canal padrao. Se user tem multiplos canais, troca no Chrome dele.
+  // v1.3.17: VOLTA a forcar channelId quando ele esta salvo do login.
+  // Sem isso, contas Google com MULTIPLOS canais (caso do Tiago: ai.tiago tem
+  // Tamo-AI + LeLeNa + canal correto) abrem em qualquer canal — Chrome
+  // escolhe pela ordem interna, ignorando ate qual janela o user deixou aberta
+  // (--new-window sem --profile-directory ignora estado anterior).
+  // O loginElectron salva yt-{account}.channelId quando o user passa pelo canal
+  // certo durante o login; aqui a gente le e passa pro PS.
+  // Fallback: se nao tiver .channelId, continua sem forcar (comportamento v1.1.3).
+  let channelId = ''
+  try {
+    if (account && dataDir) {
+      const chFile = path.join(dataDir, 'sessions', `yt-${account}.channelId`)
+      if (fs.existsSync(chFile)) {
+        const v = fs.readFileSync(chFile, 'utf-8').trim()
+        if (/^UC[\w-]+$/.test(v)) channelId = v
+      }
+    }
+  } catch {}
+
   const liveJobId = jobId || `${account || 'yt'}-${Date.now()}`
   liveView.register(liveJobId, null, { account, platform: 'youtube', status: 'iniciando' })
 
   log(`🎬 Upload YouTube via Chrome real + Win32 + UIA`)
   log(`   video: ${path.basename(videoPath)} (${Math.round(fs.statSync(videoPath).size / 1024 / 1024)}MB)`)
   log(`   titulo: ${title}`)
-  log(`   ℹ️ usa o canal logado no Chrome do PC (sem forcar via channelId)`)
+  if (channelId) log(`   📺 forcando canal ${channelId} (lido de sessions/yt-${account}.channelId)`)
+  else log(`   ⚠️ sem .channelId salvo - vai abrir no canal padrao da conta Google`)
 
   const args = [
     '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
@@ -82,6 +98,7 @@ export async function postVideoYouTube(opts) {
     '-Description', description,
     '-Visibility', visibility,
   ]
+  if (channelId) args.push('-ChannelId', channelId)
   if (madeForKids) args.push('-KidsContent')
 
   return new Promise((resolve, reject) => {
