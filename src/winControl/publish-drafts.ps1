@@ -134,43 +134,27 @@ function Click-UIA($el, [string]$label) {
 }
 
 # Achar 1o item da lista que esta como Rascunho.
-# Estrategia: procura textos cujo Name == "Rascunho" (badge da coluna Visibilidade).
-# Pra cada match, sobe ate achar um ancestor que tenha Hyperlink (titulo) e clica.
+# v1.3.21: descoberto via probe que o YT Studio renderiza um botao
+# "Editar rascunho" (Name exato) em cada linha de rascunho - 10px abaixo do
+# badge. Esse botao tem InvokePattern OK. Bem mais simples que a heuristica
+# Hyperlink anterior (que nao existia no UIA).
 function Find-FirstDraftLink {
     $root = Get-RootAE
-    $allTexts = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-    $bestRow = $null
+    $buttonCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
+    $btns = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $buttonCond)
+    $best = $null
     $bestY = 999999
-    foreach ($el in $allTexts) {
+    foreach ($b in $btns) {
         try {
-            $n = $el.Current.Name
-            if (-not $n) { continue }
-            # Match exato 'Rascunho' (badge) - nao 'Salvo como rascunho' (header status)
-            if ($n -ne 'Rascunho') { continue }
-            if ($el.Current.IsOffscreen) { continue }
-            $r = $el.Current.BoundingRectangle
-            # Filtra sidebar/header (Y < 200) e items fora da viewport
-            if ($r.Top -lt 200 -or $r.Top -gt 1000) { continue }
-            # Mantem o mais alto na tela
-            if ($r.Top -lt $bestY) { $bestY = $r.Top; $bestRow = @{ badge = $el; y = $r.Top } }
+            if ($b.Current.IsOffscreen) { continue }
+            if ($b.Current.Name -ne 'Editar rascunho') { continue }
+            $r = $b.Current.BoundingRectangle
+            if ($r.Top -lt 200) { continue }   # filtra header
+            if ($r.Top -lt $bestY) { $bestY = $r.Top; $best = $b }
         } catch {}
     }
-    if (-not $bestRow) { return $null }
-    Write-Host "  badge 'Rascunho' achado em Y=$($bestRow.y)"
-
-    # Acha um Hyperlink na mesma linha Y (+/- 30px) - eh o titulo do video
-    $links = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Hyperlink)))
-    foreach ($l in $links) {
-        try {
-            if ($l.Current.IsOffscreen) { continue }
-            $r = $l.Current.BoundingRectangle
-            if ([Math]::Abs($r.Top - $bestRow.y) -le 50 -and $r.Left -lt 800) {
-                return $l
-            }
-        } catch {}
-    }
-    Write-Host "  AVISO: nao achei Hyperlink na linha do rascunho (Y~$($bestRow.y))"
-    return $null
+    if ($best) { Write-Host "  'Editar rascunho' achado em Y=$bestY" }
+    return $best
 }
 
 # === STEP 1: abre Chrome no canal ===
@@ -214,11 +198,16 @@ for ($n = 1; $n -le $MaxToPublish; $n++) {
         Snap "no-more-drafts"
         break
     }
-    $title = $draftLink.Current.Name
-    Write-Host "  rascunho: '$title'"
 
-    # Click no titulo - abre dialog de edicao
-    Click-UIA $draftLink "titulo rascunho"
+    # Click no botao "Editar rascunho" - abre dialog de edicao
+    # v1.3.21: prefere InvokePattern (botao tem suporte). Fallback pra Win32 click.
+    $ip = $null
+    if ($draftLink.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$ip)) {
+        Write-Host "  abrindo rascunho via UIA Invoke"
+        $ip.Invoke()
+    } else {
+        Click-UIA $draftLink "Editar rascunho"
+    }
     Start-Sleep -Seconds 5
     Snap "02-after-click-titulo-$n"
 
