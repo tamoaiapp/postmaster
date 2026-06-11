@@ -375,13 +375,24 @@ export async function converterParaReel(videoPath, thumbPath, log, opts = {}) {
 
 export function loadState(stateFile) {
   try {
-    const s = JSON.parse(fs.readFileSync(stateFile, 'utf-8'))
+    // v1.3.28: TRIM BOM antes de parsear. Se alguem editou o arquivo via
+    // PowerShell `Set-Content -Encoding UTF8` (que adiciona BOM por default
+    // no PS5.1), JSON.parse falha silenciosamente e o catch retorna state
+    // VAZIO - o bot achava que nada tinha sido postado e re-postava tudo,
+    // gerando duplicatas. Strip BOM resolve.
+    let raw = fs.readFileSync(stateFile, 'utf-8')
+    if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1)
+    const s = JSON.parse(raw)
     s.trechosUsados = s.trechosUsados || {} // { [videoId]: [{start,end}, ...] }
     s.duracoes      = s.duracoes      || {} // { [videoId]: number } — cache p/ calcular gaps sem refetch
     s.titulos       = s.titulos       || {} // { [videoId]: string }
     return s
   }
-  catch { return { ultimoCanal: 0, postados: [], falhou: [], trechosUsados: {}, duracoes: {}, titulos: {} } }
+  catch (e) {
+    // Log do motivo do reset pra debug futuro - antes era catch silencioso
+    try { console.error('[loadState] FALHA - retornando state vazio. Erro:', e?.message, 'file:', stateFile) } catch {}
+    return { ultimoCanal: 0, postados: [], falhou: [], trechosUsados: {}, duracoes: {}, titulos: {} }
+  }
 }
 
 export function saveState(stateFile, s) {

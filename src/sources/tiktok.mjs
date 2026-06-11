@@ -27,8 +27,15 @@ function resolveYtDlp() {
 const YTDLP = resolveYtDlp()
 
 function loadState(file) {
-  try { return JSON.parse(fs.readFileSync(file, 'utf-8')) }
-  catch { return { ultimoCanal: 0, postados: [], falhou: [] } }
+  try {
+    let raw = fs.readFileSync(file, 'utf-8')
+    if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1)  // v1.3.28: strip BOM
+    return JSON.parse(raw)
+  }
+  catch (e) {
+    try { console.error('[tt loadState] FALHA:', e?.message, file) } catch {}
+    return { ultimoCanal: 0, postados: [], falhou: [] }
+  }
 }
 function saveState(file, state) {
   fs.writeFileSync(file, JSON.stringify(state, null, 2))
