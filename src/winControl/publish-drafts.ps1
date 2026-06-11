@@ -174,8 +174,31 @@ $win = Find-Window 'YouTube Studio'
 if (-not $win) { Write-Host "ERRO: janela Studio nao encontrada"; Remove-Item $lockFile -ErrorAction SilentlyContinue; Write-Host "DRAFTS_PUBLISHED:0"; exit 1 }
 $script:hwnd = $win.hwnd
 Write-Host "  HWND=$($script:hwnd)  $($win.title)"
+
+# v1.3.24: forca maximize agressivo. Chrome ignora --start-maximized se
+# outras janelas Chrome ja estao abertas - cria nova janela no tamanho
+# default (~1024x768). Sem janela cheia, lista de videos pode nao caber
+# todos os botoes "Editar rascunho" na viewport.
+[W32]::ShowWindow($script:hwnd, [W32]::SW_RESTORE) | Out-Null
+Start-Sleep -Milliseconds 200
 [W32]::ShowWindow($script:hwnd, [W32]::SW_SHOWMAXIMIZED) | Out-Null
-Start-Sleep -Milliseconds 1500
+Start-Sleep -Milliseconds 600
+
+# Confirma maximize via bounds. Se < tela cheia, manda WM_SYSCOMMAND SC_MAXIMIZE
+$r = New-Object W32+RECT
+[W32]::GetWindowRect($script:hwnd, [ref]$r) | Out-Null
+$winW = $r.Right - $r.Left
+$winH = $r.Bottom - $r.Top
+$scrW = [W32]::GetSystemMetrics(0)
+$scrH = [W32]::GetSystemMetrics(1)
+Write-Host "  janela: ${winW}x${winH} em ($($r.Left),$($r.Top))  tela: ${scrW}x${scrH}"
+if ($winW -lt ($scrW - 50)) {
+    Write-Host "  janela menor que tela - forcando via WM_SYSCOMMAND SC_MAXIMIZE"
+    # WM_SYSCOMMAND = 0x0112, SC_MAXIMIZE = 0xF030
+    [W32]::PostMessage($script:hwnd, 0x0112, [IntPtr]0xF030, [IntPtr]::Zero) | Out-Null
+    Start-Sleep -Milliseconds 1000
+}
+
 Set-WindowFocus $script:hwnd
 Start-Sleep -Milliseconds 800
 
@@ -183,6 +206,32 @@ Start-Sleep -Milliseconds 800
 $ready = Find-UIA-Like "Recolher menu" "Button" 30000
 if (-not $ready) { Write-Host "  WARN: Studio nao terminou de carregar" }
 Start-Sleep -Seconds 3
+Snap "01-after-load"
+
+# v1.3.24: YT redireciona /videos/upload pro Painel se Chrome reaproveita tab/sessao.
+# Detecta header "Conteudo do canal" - se nao achou, forca navegacao via omnibox.
+$onContent = Find-UIA-Like "Conteudo do canal" $null 1500
+if (-not $onContent) {
+    Write-Host "  [nav] nao estamos em /videos/upload - forcando via Ctrl+L"
+    Set-WindowFocus $script:hwnd
+    Start-Sleep -Milliseconds 400
+    Set-Clipboard -Value $videosUrl
+    Start-Sleep -Milliseconds 200
+    [System.Windows.Forms.SendKeys]::SendWait('^l')   # Ctrl+L = focus omnibox
+    Start-Sleep -Milliseconds 500
+    [System.Windows.Forms.SendKeys]::SendWait('^a')   # select all (pode ter texto)
+    Start-Sleep -Milliseconds 200
+    [System.Windows.Forms.SendKeys]::SendWait('{DELETE}')
+    Start-Sleep -Milliseconds 200
+    [System.Windows.Forms.SendKeys]::SendWait('^v')   # paste URL
+    Start-Sleep -Milliseconds 300
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Seconds 8
+    Snap "01b-after-nav-fix"
+} else {
+    Write-Host "  ja estamos em Conteudo do canal"
+}
+Start-Sleep -Seconds 2
 Snap "01-list-ready"
 
 # === LOOP por rascunho ===

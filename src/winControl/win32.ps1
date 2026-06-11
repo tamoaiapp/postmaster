@@ -23,6 +23,8 @@ public class W32 {
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint tid1, uint tid2, bool attach);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] public static extern int GetSystemMetrics(int n);
     [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
     public delegate bool EnumWindowsProc(IntPtr h, IntPtr p);
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
