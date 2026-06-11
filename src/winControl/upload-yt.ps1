@@ -18,9 +18,25 @@ Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Windows.Forms
 . "$PSScriptRoot\win32.ps1"
 
-# v1.3.20: lock pra coordenar com publish-drafts.ps1 (cron de drenar rascunhos)
-# Cria no inicio, deleta no fim. publish-drafts skipa se esse lock existir.
+# v1.3.20/22: lock pra coordenar com publish-drafts.ps1 (cron de drenar rascunhos)
+# v1.3.22: agora upload-yt CHECA o lock antes de criar (mutex real). Se publish-drafts
+# esta rodando (lock existe e conteudo contem "publish-drafts"), aborta com exit code
+# proprio pra o jobRunner re-tentar mais tarde (sem marcar video como falhou).
 $lockFile = "$env:TEMP\postmaster-yt-busy.lock"
+if (Test-Path $lockFile) {
+    $content = ""
+    try { $content = Get-Content $lockFile -Raw -ErrorAction Stop } catch {}
+    $age = ((Get-Date) - (Get-Item $lockFile).LastWriteTime).TotalMinutes
+    if ($content -match 'publish-drafts' -and $age -lt 25) {
+        Write-Host "AVISO: publish-drafts.ps1 esta rodando ($([math]::Round($age,1))min) - abortando upload-yt pra evitar conflito Chrome"
+        Write-Host "RETRY_LATER"
+        exit 42  # codigo especial pro jobRunner entender que nao foi falha do video
+    }
+    if ($age -gt 30) {
+        Write-Host "Lock orfao ($([math]::Round($age,1))min) - removendo"
+        Remove-Item $lockFile -ErrorAction SilentlyContinue
+    }
+}
 "upload-yt $PID $(Get-Date -Format o)" | Out-File -FilePath $lockFile -Encoding utf8
 
 $outDir = "$PSScriptRoot\out"

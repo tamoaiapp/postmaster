@@ -477,6 +477,7 @@ export default async function jobRunner(job, dataDir, log) {
 
   // ── Postar ───────────────────────────────────────────────────────────────────
   let ok = false
+  let retryLater = false
   try {
     if (job.platform === 'instagram') {
       log('📤 Postando no Instagram...')
@@ -499,12 +500,19 @@ export default async function jobRunner(job, dataDir, log) {
     }
   } catch (err) {
     log(`❌ Erro ao postar: ${err.message}`)
+    // v1.3.22: erro com retryLater = publish-drafts esta usando o Chrome.
+    // NAO limpa video, NAO marca falhou - so devolve sem postar pra re-tentar.
+    if (err.retryLater) {
+      log(`⏸️ Job devolve sem marcar falha - video sera retentado proximo ciclo`)
+      retryLater = true
+    }
   } finally {
-    // Limpar vídeo baixado (não limpar se for pasta manual)
-    if (job.source !== 'manual') {
+    // Limpar vídeo baixado (não limpar se for pasta manual nem se for retryLater)
+    if (job.source !== 'manual' && !retryLater) {
       try { if (videoPath) fs.unlinkSync(videoPath) } catch {}
     }
   }
+  if (retryLater) return { posted: false, retryLater: true }
 
   if (ok && videoMeta.id) {
     // YouTube com reaproveitamento: salva trecho usado, esgota apenas se sem espaço

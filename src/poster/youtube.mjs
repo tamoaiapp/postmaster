@@ -131,12 +131,14 @@ export async function postVideoYouTube(opts) {
 
     ps.on('exit', code => {
       try { liveView.unregister(liveJobId) } catch {}
-      // v1.3.15: regex antiga /PUBLICADO!/ exigia exclamacao grudada na palavra
-      // mas o upload-yt.ps1 imprime "PUBLICADO (UIA)!", "PUBLICADO (coord geometrica)!"
-      // ou "Modal confirmado e fechado - PUBLICADO de verdade!" - todos com texto
-      // entre PUBLICADO e o !. Bot completava upload OK mas regex nao matchava ->
-      // marcarFalhou -> postCount=0 -> bot pegava mesmo video proximo ciclo.
-      // Aceita qualquer ocorrencia de PUBLICADO/Publicado/Modal de confirmacao processado.
+      // v1.3.22: exit 42 = publish-drafts esta usando o Chrome. NAO marca falha,
+      // sinaliza "tente depois" pro jobRunner via erro especifico.
+      if (code === 42 || /RETRY_LATER/.test(output)) {
+        const e = new Error('publish-drafts em curso - tente depois')
+        e.retryLater = true
+        log(`⏸️ Upload adiado: ${e.message}`)
+        return reject(e)
+      }
       const success = code === 0 && (
         /PUBLICADO/i.test(output) ||
         /Modal de confirmacao processado/i.test(output) ||
