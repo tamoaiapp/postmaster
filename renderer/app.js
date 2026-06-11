@@ -1018,11 +1018,21 @@ function getWizardBody(step) {
           </div>
         </div>
 
+` : ''}
+
+      ${wizardData.source !== 'manual' ? `
         <div class="filter-section">
           <label class="form-check">
             <input type="checkbox" id="wiz-only-new" ${wizardData.filterOnlyNew?'checked':''}>
             Pular vídeos já postados anteriormente
           </label>
+        </div>
+        <div class="filter-section">
+          <div class="filter-section-title">🎯 Quantos vídeos verificar por ciclo</div>
+          <div class="form-group" style="margin-bottom:14px">
+            <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px">Bot busca os N últimos vídeos do canal/perfil a cada ciclo. Aumenta pra pegar mais histórico de uma vez. Padrão: 20.</label>
+            <input type="number" id="wiz-max-videos" value="${wizardData.filterMaxVideos||20}" min="1" max="200" style="width:120px">
+          </div>
         </div>` : ''}
 
       <div class="filter-section">
