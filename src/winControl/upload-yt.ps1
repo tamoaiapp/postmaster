@@ -468,19 +468,16 @@ for ($i = 1; $i -le $maxAvancar; $i++) {
 
 # === STEP 9: Visibilidade Privado via SelectionItemPattern ===
 Write-Host "[9] Selecionando visibilidade '$Visibility' via SelectionItemPattern..."
-# v1.3.18: 'public' usa 'Publicos' (plural com S) porque o radio no YT PT-BR se
-# chama "Públicos", nao "Público". Antes ficava 'Publico' (singular) e o match
-# por igualdade falhava -> caia no else "exato nao achado" -> rascunho ou
-# pior, video aparecia como Nao listado pq nada foi selecionado e YT
-# manteve o default (Nao listado quando algum aviso de verificacao ativa).
-$visLabel = switch ($Visibility) { 'private' { 'Privado' } 'unlisted' { 'Nao listado' } 'public' { 'Publicos' } default { 'Privado' } }
-# Procura RadioButton exato - NAO 'Salvo como privado' (que eh status)
+# v1.3.25: YT renderiza "Publico" singular OU "Publicos" plural dependendo do
+# fluxo (rascunho edit vs upload novo). Usa Contains com limite de tamanho
+# pra evitar falsos positivos tipo "Salvo como Privado".
+$visLabel = switch ($Visibility) { 'private' { 'Privado' } 'unlisted' { 'Nao listado' } 'public' { 'Publico' } default { 'Privado' } }
 $visRadio = $null
 $allRadios = (Get-RootAE).FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::RadioButton)))
 foreach ($r in $allRadios) {
     $n = (Remove-Diacritics $r.Current.Name).ToLower()
     $needle = (Remove-Diacritics $visLabel).ToLower()
-    if ($n -eq $needle -or $n.StartsWith($needle + ' ') -or $n.StartsWith($needle + '.')) {
+    if ($n.Contains($needle) -and $n.Length -le ($needle.Length + 3)) {
         $visRadio = $r
         break
     }

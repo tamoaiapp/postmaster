@@ -175,26 +175,32 @@ if (-not $win) { Write-Host "ERRO: janela Studio nao encontrada"; Remove-Item $l
 $script:hwnd = $win.hwnd
 Write-Host "  HWND=$($script:hwnd)  $($win.title)"
 
-# v1.3.24: forca maximize agressivo. Chrome ignora --start-maximized se
-# outras janelas Chrome ja estao abertas - cria nova janela no tamanho
-# default (~1024x768). Sem janela cheia, lista de videos pode nao caber
-# todos os botoes "Editar rascunho" na viewport.
+# v1.3.25: forca tela INTEIRA via MoveWindow + ShowWindow.
+# Observado v1.3.24: SW_SHOWMAXIMIZED + WM_SYSCOMMAND SC_MAXIMIZE nao
+# resolveu - Chrome abria pela METADE da tela (snap layout Windows
+# possivelmente preservava state). User reportou: "ELE TEM QUE ABRIR
+# A JANELA INTEIRA E NAO A METADE, POR ISSO NUNCA POSTA". Sem tela
+# cheia, YT renderiza diferente e mouse_event nas coords UIA cai errado.
+$scrW = [W32]::GetSystemMetrics(0)
+$scrH = [W32]::GetSystemMetrics(1)
 [W32]::ShowWindow($script:hwnd, [W32]::SW_RESTORE) | Out-Null
-Start-Sleep -Milliseconds 200
+Start-Sleep -Milliseconds 300
+# MoveWindow direto pra 0,0 + tela inteira - ignora snap layout / last state
+[W32]::MoveWindow($script:hwnd, 0, 0, $scrW, $scrH, $true) | Out-Null
+Start-Sleep -Milliseconds 400
 [W32]::ShowWindow($script:hwnd, [W32]::SW_SHOWMAXIMIZED) | Out-Null
 Start-Sleep -Milliseconds 600
 
-# Confirma maximize via bounds. Se < tela cheia, manda WM_SYSCOMMAND SC_MAXIMIZE
+# Confirma via bounds
 $r = New-Object W32+RECT
 [W32]::GetWindowRect($script:hwnd, [ref]$r) | Out-Null
 $winW = $r.Right - $r.Left
 $winH = $r.Bottom - $r.Top
-$scrW = [W32]::GetSystemMetrics(0)
-$scrH = [W32]::GetSystemMetrics(1)
 Write-Host "  janela: ${winW}x${winH} em ($($r.Left),$($r.Top))  tela: ${scrW}x${scrH}"
-if ($winW -lt ($scrW - 50)) {
-    Write-Host "  janela menor que tela - forcando via WM_SYSCOMMAND SC_MAXIMIZE"
-    # WM_SYSCOMMAND = 0x0112, SC_MAXIMIZE = 0xF030
+if ($winW -lt ($scrW - 100)) {
+    Write-Host "  AVISO: ainda menor - 2a tentativa MoveWindow + SC_MAXIMIZE"
+    [W32]::MoveWindow($script:hwnd, 0, 0, $scrW, $scrH, $true) | Out-Null
+    Start-Sleep -Milliseconds 500
     [W32]::PostMessage($script:hwnd, 0x0112, [IntPtr]0xF030, [IntPtr]::Zero) | Out-Null
     Start-Sleep -Milliseconds 1000
 }
@@ -295,33 +301,39 @@ for ($n = 1; $n -le $MaxToPublish; $n++) {
     Snap "03-after-verif-wait-$n"
 
     # === Avancar ate Visibilidade ===
-    Write-Host "  Avancando ate Visibilidade..."
-    $maxAvancar = 6
+    # v1.3.25: SEMPRE usa Click-UIA (mouse_event) - YT React ignora Invoke
+    # sintetico. Observado em v1.3.24: 6 clicks Invoke no Avancar deixaram o
+    # dialog parado na aba Detalhes. Mouse real dispara onClick React OK.
+    # SetFocus antes de cada click pra garantir que o evento vai pra janela certa.
+    Write-Host "  Avancando ate Visibilidade (mouse_event SEMPRE)..."
+    $maxAvancar = 5
     for ($i = 1; $i -le $maxAvancar; $i++) {
         Start-Sleep -Milliseconds 1500
         $visRadio = Find-UIA-Like "Privado" "RadioButton" 1500
         if ($visRadio) { Write-Host "  Visibilidade alcancada apos $($i-1) Avancar(es)"; break }
         $avancar = Find-UIA-Like-InBounds "avancar" "Button" 200 9999 3000
         if (-not $avancar) { Write-Host "  Avancar #$i nao achado"; Snap "fail-no-avancar-${n}-${i}"; break }
-        $invokePat = $null
-        if ($avancar.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invokePat)) {
-            $invokePat.Invoke()
-        } else {
-            Click-UIA $avancar "Avancar #$i"
-        }
-        Start-Sleep -Milliseconds 2000
+        Set-WindowFocus $script:hwnd
+        Start-Sleep -Milliseconds 300
+        Click-UIA $avancar "Avancar #$i (mouse_event)"
+        Start-Sleep -Milliseconds 2200
         Snap "04-after-avancar-${n}-${i}"
     }
 
     # === Marcar visibility ===
+    # v1.3.25: rascunho edit usa "Publico" singular, upload novo usa "Publicos"
+    # plural. Aceita ambos via Contains pra ser tolerante.
     Write-Host "  Marcando '$Visibility'..."
-    $visLabel = switch ($Visibility) { 'private' { 'Privado' } 'unlisted' { 'Nao listado' } 'public' { 'Publicos' } default { 'Privado' } }
+    $visLabel = switch ($Visibility) { 'private' { 'Privado' } 'unlisted' { 'Nao listado' } 'public' { 'Publico' } default { 'Privado' } }
     $visRadio = $null
     $allRadios = (Get-RootAE).FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::RadioButton)))
     foreach ($rb in $allRadios) {
         $rn = (Remove-Diacritics $rb.Current.Name).ToLower()
         $needle = (Remove-Diacritics $visLabel).ToLower()
-        if ($rn -eq $needle -or $rn.StartsWith($needle + ' ') -or $rn.StartsWith($needle + '.')) { $visRadio = $rb; break }
+        # Match: nome contem needle (pega Publico, Publicos, ou variantes)
+        # MAS evita falsos positivos como "Salvar como Privado" que tb contem
+        # "privado" - filtra por nome curto (<= needle + 3 chars)
+        if ($rn.Contains($needle) -and $rn.Length -le ($needle.Length + 3)) { $visRadio = $rb; break }
     }
     if ($visRadio) {
         Write-Host "    achei: '$($visRadio.Current.Name)'"
