@@ -33,6 +33,18 @@ Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Windows.Forms
 . "$PSScriptRoot\win32.ps1"
 
+# v1.3.26: declara DPI awareness ANTES de qualquer GetSystemMetrics / UIA /
+# SetCursorPos. Sem isso, em monitores com scaling != 100% (caso do Tiago:
+# 125%, fisico 1920x1080, logical 1536x864), GetSystemMetrics retorna LOGICAL
+# (864) mas UIA BoundingRectangle retorna PHYSICAL (Y=894). Resultado:
+# Click-UIA pega Y=894 e chama SetCursorPos(x, 894) - mas como o processo
+# NAO eh DPI-aware, Windows trata 894 como LOGICAL e escala pra physical
+# multiplicando por 1.25 = 1117 - fora da tela. Click perdido.
+# Isso causou TODOS os bugs do publish-drafts: clicks em Avancar caiam fora
+# da viewport, dialog nunca avanc¸ava de aba.
+[W32]::SetProcessDPIAware() | Out-Null
+Write-Host "DPI awareness ativada"
+
 $outDir = "$PSScriptRoot\out"
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 $ts = (Get-Date).ToString("yyyyMMdd-HHmmss")
@@ -375,15 +387,43 @@ for ($n = 1; $n -le $MaxToPublish; $n++) {
     # Tenta UIA Button "publicar" no rodape do dialog (Y > 200)
     $publicar = Find-UIA-Like-InBounds "publicar" "Button" 200 9999 4000
     if (-not $publicar) { $publicar = Find-UIA-Like-InBounds "salvar" "Button" 200 9999 2000 }
+    # v1.3.26: detecta sucesso por texto "Video publicado" no modal final.
+    # Tambem aceita texto "Enviado em" (que aparece no modal junto), ou botoes
+    # "Compartilhar"/"Promova"/"Promover esse video" (so existem no modal de
+    # sucesso). Find-UIA-Like antigo pegava tabs offscreen do DOM e dava falso
+    # negativo.
+    function Test-Publicado {
+        $root2 = Get-RootAE
+        $els = $root2.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+        foreach ($e in $els) {
+            try {
+                if ($e.Current.IsOffscreen) { continue }
+                $n = $e.Current.Name
+                if (-not $n) { continue }
+                if ($n -match '(?i)v[ií]deo publicado|publicado em|video published|promover esse v[ií]deo|enviado em [0-9]+ de') { return $true }
+            } catch {}
+        }
+        return $false
+    }
+    # Retry ate 25s - modal de sucesso pode demorar pra renderizar
+    function Wait-Publicado([int]$maxSec = 25) {
+        $deadline = (Get-Date).AddSeconds($maxSec)
+        $iter = 0
+        while ((Get-Date) -lt $deadline) {
+            $iter++
+            if (Test-Publicado) { Write-Host "    Test-Publicado OK apos $iter checks"; return $true }
+            Start-Sleep -Seconds 2
+        }
+        return $false
+    }
+
     if ($publicar) {
         $ip2 = $null
         if ($publicar.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$ip2)) { $ip2.Invoke() } else { Click-UIA $publicar "Publicar" }
-        Start-Sleep -Seconds 4
-        $still = Find-UIA-Like "Visibilidade" "" 1500
-        if (-not $still) { Write-Host "    PUBLICADO (UIA)!"; $publicado = $true }
+        if (Wait-Publicado 25) { Write-Host "    PUBLICADO (UIA)!"; $publicado = $true }
     }
     if (-not $publicado) {
-        # Fallback coord (igual upload-yt.ps1 step 10)
+        # Fallback coord
         $rootEl = [System.Windows.Automation.AutomationElement]::RootElement
         $wins = $rootEl.FindAll([System.Windows.Automation.TreeScope]::Children, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Window)))
         $chromeWin = $null
@@ -400,9 +440,7 @@ for ($n = 1; $n -le $MaxToPublish; $n++) {
             [W32]::mouse_event(0x0002, 0, 0, 0, 0)
             Start-Sleep -Milliseconds 80
             [W32]::mouse_event(0x0004, 0, 0, 0, 0)
-            Start-Sleep -Seconds 5
-            $check2 = Find-UIA-Like "Visibilidade" "" 1500
-            if (-not $check2) { Write-Host "    PUBLICADO (coord)!"; $publicado = $true }
+            if (Wait-Publicado 25) { Write-Host "    PUBLICADO (coord)!"; $publicado = $true }
         }
     }
 

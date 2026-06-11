@@ -18,6 +18,14 @@ Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Windows.Forms
 . "$PSScriptRoot\win32.ps1"
 
+# v1.3.26: DPI awareness obrigatorio. Sem isso, GetSystemMetrics e SetCursorPos
+# trabalham em LOGICAL pixels enquanto UIA BoundingRectangle retorna PHYSICAL.
+# Em monitor com scaling != 100%, mouse_event cai em coords erradas.
+# Especialmente botoes na parte de baixo do dialog (Publicar, Avancar) que
+# tem Y proximo do limite physical mas fora do limite logical.
+[W32]::SetProcessDPIAware() | Out-Null
+Write-Host "DPI awareness ativada"
+
 # v1.3.20/22: lock pra coordenar com publish-drafts.ps1 (cron de drenar rascunhos)
 # v1.3.22: agora upload-yt CHECA o lock antes de criar (mutex real). Se publish-drafts
 # esta rodando (lock existe e conteudo contem "publish-drafts"), aborta com exit code
