@@ -18,9 +18,20 @@ Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Windows.Forms
 . "$PSScriptRoot\win32.ps1"
 
+# v1.3.20: lock pra coordenar com publish-drafts.ps1 (cron de drenar rascunhos)
+# Cria no inicio, deleta no fim. publish-drafts skipa se esse lock existir.
+$lockFile = "$env:TEMP\postmaster-yt-busy.lock"
+"upload-yt $PID $(Get-Date -Format o)" | Out-File -FilePath $lockFile -Encoding utf8
+
 $outDir = "$PSScriptRoot\out"
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 $ts = (Get-Date).ToString("yyyyMMdd-HHmmss")
+
+# Cleanup do lock SEMPRE (mesmo se throw)
+trap {
+    try { Remove-Item $lockFile -ErrorAction SilentlyContinue } catch {}
+    throw
+}
 
 function Snap([string]$label) {
     $path = "$outDir\uia-$label-$ts.png"
@@ -718,3 +729,6 @@ if ($ainda) {
 Write-Host ""
 Write-Host "=== STEP 6 OK - verificar screenshots e prosseguir step 7+ depois ==="
 Write-Host "Screenshots em: $outDir"
+
+# v1.3.20: libera lock no final (cleanup garantido)
+try { Remove-Item $lockFile -ErrorAction SilentlyContinue } catch {}

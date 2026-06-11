@@ -315,6 +315,43 @@ ipcMain.handle('human-intervention:open', async (_, args) => {
   })
 })
 
+// v1.3.20: cron pra drenar rascunhos do YT a cada 15min.
+// Pra cada YT account em accounts.json, roda publish-drafts.ps1.
+// Lock pra nao conflitar com upload-yt.ps1 em curso (PS detecta sozinho via lockfile).
+let ytDraftsBusy = false
+function setupYtDraftsDrain() {
+  const tick = async () => {
+    if (ytDraftsBusy) return
+    ytDraftsBusy = true
+    try {
+      const accountsFile = path.join(DATA_DIR, 'accounts.json')
+      if (!fs.existsSync(accountsFile)) return
+      const accs = JSON.parse(fs.readFileSync(accountsFile, 'utf-8') || '[]')
+      const ytAccs = accs.filter(a => a.platform === 'youtube' && a.username)
+      if (!ytAccs.length) return
+      const { publishDraftsForAccount } = await import('./src/poster/youtube-publish-drafts.mjs')
+      for (const acc of ytAccs) {
+        await publishDraftsForAccount({
+          account: acc.username,
+          dataDir: DATA_DIR,
+          maxToPublish: 5,
+          visibility: 'public',
+          log: (m) => console.log(`[yt-drafts-cron] ${m}`),
+        })
+      }
+    } catch (e) {
+      console.error('[yt-drafts-cron] erro:', e?.message)
+    } finally {
+      ytDraftsBusy = false
+    }
+  }
+  // 1a execucao em 5min (deixa o app estabilizar e dar tempo pro 1o upload rolar)
+  setTimeout(tick, 5 * 60 * 1000)
+  // Depois a cada 15min
+  setInterval(tick, 15 * 60 * 1000)
+  console.log('[yt-drafts-cron] agendado: 1x em 5min, depois a cada 15min')
+}
+
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null)
   ensureDataDir()
@@ -324,6 +361,7 @@ app.whenReady().then(async () => {
   win.webContents.once('did-finish-load', async () => {
     startEmbeddedAI()
     setupAutoUpdate()
+    setupYtDraftsDrain()
     // Live View — pluga main window pro tracker de screenshots
     try {
       const liveView = await import('./src/liveView.mjs')

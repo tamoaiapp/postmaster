@@ -1,0 +1,386 @@
+# Drena rascunhos de um canal YouTube — abre Studio, itera lista de Rascunhos,
+# publica cada um (Publicos + espera verificacao + handle modal).
+#
+# v1.3.20: complemento do upload-yt.ps1 — o uploader pode terminar com video
+# em rascunho se verificacao do YT atrasou. Esse script roda em paralelo via
+# cron 15min e drena rascunhos residuais.
+#
+# Uso: powershell -File publish-drafts.ps1 -ChannelId UCxxx [-MaxToPublish 5] [-Visibility public]
+
+param(
+    [Parameter(Mandatory=$true)] [string]$ChannelId,
+    [int]$MaxToPublish = 5,
+    [string]$Visibility = "public"
+)
+
+# --- Lock: skip se upload-yt.ps1 esta rodando ---
+$lockFile = "$env:TEMP\postmaster-yt-busy.lock"
+if (Test-Path $lockFile) {
+    $age = ((Get-Date) - (Get-Item $lockFile).LastWriteTime).TotalMinutes
+    if ($age -lt 30) {
+        Write-Host "AVISO: upload-yt.ps1 esta rodando (lock $lockFile com $([math]::Round($age,1))min) - skip"
+        Write-Host "DRAFTS_PUBLISHED:0"
+        exit 0
+    }
+    Write-Host "Lock antigo ($([math]::Round($age,1))min) - ignorando"
+    Remove-Item $lockFile -ErrorAction SilentlyContinue
+}
+# Cria proprio lock pra outros workers (upload-yt tb skipa se ja tem)
+"publish-drafts $PID $(Get-Date -Format o)" | Out-File -FilePath $lockFile -Encoding utf8
+
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+Add-Type -AssemblyName System.Windows.Forms
+. "$PSScriptRoot\win32.ps1"
+
+$outDir = "$PSScriptRoot\out"
+New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+$ts = (Get-Date).ToString("yyyyMMdd-HHmmss")
+
+function Snap([string]$label) {
+    $path = "$outDir\drafts-$label-$ts.png"
+    try { Save-WindowScreenshot $script:hwnd $path | Out-Null } catch {}
+    Write-Host "  [shot] $label"
+}
+
+function Get-RootAE { return [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$script:hwnd) }
+
+function Remove-Diacritics([string]$s) {
+    if (-not $s) { return '' }
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($c in $s.Normalize([System.Text.NormalizationForm]::FormD).ToCharArray()) {
+        if ([System.Globalization.CharUnicodeInfo]::GetUnicodeCategory($c) -ne [System.Globalization.UnicodeCategory]::NonSpacingMark) {
+            [void]$sb.Append($c)
+        }
+    }
+    return $sb.ToString()
+}
+
+function Find-UIA-Like([string]$substr, [string]$controlType = $null, [int]$timeoutMs = 8000) {
+    $needle = (Remove-Diacritics $substr).ToLower()
+    $start = Get-Date
+    while (((Get-Date) - $start).TotalMilliseconds -lt $timeoutMs) {
+        $root = Get-RootAE
+        if ($controlType) {
+            $ctMember = [System.Windows.Automation.ControlType]::$controlType
+            $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $ctMember)
+            $els = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)
+        } else {
+            $els = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+        }
+        foreach ($el in $els) {
+            $n = $el.Current.Name
+            if (-not $n) { continue }
+            $nNorm = (Remove-Diacritics $n).ToLower()
+            if ($nNorm.Contains($needle)) { return $el }
+        }
+        Start-Sleep -Milliseconds 400
+    }
+    return $null
+}
+
+function Find-UIA-Like-InBounds([string]$substr, [string]$controlType, [int]$yMin = 0, [int]$yMax = 9999, [int]$timeoutMs = 5000) {
+    $needle = (Remove-Diacritics $substr).ToLower()
+    $start = Get-Date
+    while (((Get-Date) - $start).TotalMilliseconds -lt $timeoutMs) {
+        $root = Get-RootAE
+        if ($controlType) {
+            $ctMember = [System.Windows.Automation.ControlType]::$controlType
+            $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $ctMember)
+            $els = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)
+        } else {
+            $els = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+        }
+        foreach ($el in $els) {
+            $n = $el.Current.Name
+            if (-not $n) { continue }
+            $nNorm = (Remove-Diacritics $n).ToLower()
+            if ($nNorm.Contains($needle)) {
+                $r = $el.Current.BoundingRectangle
+                if ($r.Top -ge $yMin -and $r.Top -le $yMax) { return $el }
+            }
+        }
+        Start-Sleep -Milliseconds 400
+    }
+    return $null
+}
+
+function Find-UIA([string]$name, [string]$controlType = $null, [int]$timeoutMs = 10000) {
+    $start = Get-Date
+    while (((Get-Date) - $start).TotalMilliseconds -lt $timeoutMs) {
+        $root = Get-RootAE
+        $nameCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $name)
+        if ($controlType) {
+            $ctMember = [System.Windows.Automation.ControlType]::$controlType
+            $ctCond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $ctMember)
+            $cond = New-Object System.Windows.Automation.AndCondition($nameCond, $ctCond)
+        } else {
+            $cond = $nameCond
+        }
+        $el = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+        if ($el) { return $el }
+        Start-Sleep -Milliseconds 500
+    }
+    return $null
+}
+
+function Click-UIA($el, [string]$label) {
+    if (-not $el) { throw "elemento nulo: $label" }
+    $r = $el.Current.BoundingRectangle
+    $cx = [int](($r.Left + $r.Right) / 2)
+    $cy = [int](($r.Top + $r.Bottom) / 2)
+    Write-Host "  [click] '$label' via Win32 mouse em ($cx, $cy)"
+    Invoke-HumanClick $cx $cy
+}
+
+# Achar 1o item da lista que esta como Rascunho.
+# Estrategia: procura textos cujo Name == "Rascunho" (badge da coluna Visibilidade).
+# Pra cada match, sobe ate achar um ancestor que tenha Hyperlink (titulo) e clica.
+function Find-FirstDraftLink {
+    $root = Get-RootAE
+    $allTexts = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+    $bestRow = $null
+    $bestY = 999999
+    foreach ($el in $allTexts) {
+        try {
+            $n = $el.Current.Name
+            if (-not $n) { continue }
+            # Match exato 'Rascunho' (badge) - nao 'Salvo como rascunho' (header status)
+            if ($n -ne 'Rascunho') { continue }
+            if ($el.Current.IsOffscreen) { continue }
+            $r = $el.Current.BoundingRectangle
+            # Filtra sidebar/header (Y < 200) e items fora da viewport
+            if ($r.Top -lt 200 -or $r.Top -gt 1000) { continue }
+            # Mantem o mais alto na tela
+            if ($r.Top -lt $bestY) { $bestY = $r.Top; $bestRow = @{ badge = $el; y = $r.Top } }
+        } catch {}
+    }
+    if (-not $bestRow) { return $null }
+    Write-Host "  badge 'Rascunho' achado em Y=$($bestRow.y)"
+
+    # Acha um Hyperlink na mesma linha Y (+/- 30px) - eh o titulo do video
+    $links = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Hyperlink)))
+    foreach ($l in $links) {
+        try {
+            if ($l.Current.IsOffscreen) { continue }
+            $r = $l.Current.BoundingRectangle
+            if ([Math]::Abs($r.Top - $bestRow.y) -le 50 -and $r.Left -lt 800) {
+                return $l
+            }
+        } catch {}
+    }
+    Write-Host "  AVISO: nao achei Hyperlink na linha do rascunho (Y~$($bestRow.y))"
+    return $null
+}
+
+# === STEP 1: abre Chrome no canal ===
+$chrome = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
+if (-not (Test-Path $chrome)) { $chrome = "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe" }
+if (-not (Test-Path $chrome)) { throw "Chrome nao instalado" }
+
+$videosUrl = "https://studio.youtube.com/channel/$ChannelId/videos/upload"
+Write-Host "[1] Abrindo Chrome em: $videosUrl"
+Start-Process -FilePath $chrome -ArgumentList "--new-window", "--start-maximized", $videosUrl
+Write-Host "  aguardando 20s..."
+Start-Sleep -Seconds 20
+
+# === STEP 2: acha janela ===
+Write-Host "[2] Achando janela Studio..."
+$win = Find-Window 'YouTube Studio'
+if (-not $win) { Write-Host "ERRO: janela Studio nao encontrada"; Remove-Item $lockFile -ErrorAction SilentlyContinue; Write-Host "DRAFTS_PUBLISHED:0"; exit 1 }
+$script:hwnd = $win.hwnd
+Write-Host "  HWND=$($script:hwnd)  $($win.title)"
+[W32]::ShowWindow($script:hwnd, [W32]::SW_SHOWMAXIMIZED) | Out-Null
+Start-Sleep -Milliseconds 1500
+Set-WindowFocus $script:hwnd
+Start-Sleep -Milliseconds 800
+
+# espera Studio renderizar
+$ready = Find-UIA-Like "Recolher menu" "Button" 30000
+if (-not $ready) { Write-Host "  WARN: Studio nao terminou de carregar" }
+Start-Sleep -Seconds 3
+Snap "01-list-ready"
+
+# === LOOP por rascunho ===
+$published = 0
+for ($n = 1; $n -le $MaxToPublish; $n++) {
+    Write-Host ""
+    Write-Host "=== Rascunho #$n ==="
+
+    # Tenta achar primeiro rascunho na lista
+    $draftLink = Find-FirstDraftLink
+    if (-not $draftLink) {
+        Write-Host "  Sem mais rascunhos (ou layout nao reconhecido) - parando"
+        Snap "no-more-drafts"
+        break
+    }
+    $title = $draftLink.Current.Name
+    Write-Host "  rascunho: '$title'"
+
+    # Click no titulo - abre dialog de edicao
+    Click-UIA $draftLink "titulo rascunho"
+    Start-Sleep -Seconds 5
+    Snap "02-after-click-titulo-$n"
+
+    # Espera dialog renderizar - procura "Detalhes" ou aba/tab
+    $dialogReady = Find-UIA-Like "Detalhes" "" 10000
+    if (-not $dialogReady) {
+        Write-Host "  AVISO: dialog nao abriu - skip"
+        Snap "fail-no-dialog-$n"
+        # ESC pra voltar pra lista
+        [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+        Start-Sleep -Seconds 2
+        continue
+    }
+
+    # === Avancar ate Visibilidade ===
+    Write-Host "  Avancando ate Visibilidade..."
+    $maxAvancar = 6
+    for ($i = 1; $i -le $maxAvancar; $i++) {
+        Start-Sleep -Milliseconds 1500
+        $visRadio = Find-UIA-Like "Privado" "RadioButton" 1500
+        if ($visRadio) { Write-Host "  Visibilidade alcancada apos $($i-1) Avancar(es)"; break }
+        $avancar = Find-UIA-Like-InBounds "avancar" "Button" 200 9999 3000
+        if (-not $avancar) { Write-Host "  Avancar #$i nao achado"; break }
+        $invokePat = $null
+        if ($avancar.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invokePat)) {
+            $invokePat.Invoke()
+        } else {
+            Click-UIA $avancar "Avancar #$i"
+        }
+        Start-Sleep -Milliseconds 2000
+    }
+
+    # === Marcar visibility ===
+    Write-Host "  Marcando '$Visibility'..."
+    $visLabel = switch ($Visibility) { 'private' { 'Privado' } 'unlisted' { 'Nao listado' } 'public' { 'Publicos' } default { 'Privado' } }
+    $visRadio = $null
+    $allRadios = (Get-RootAE).FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::RadioButton)))
+    foreach ($rb in $allRadios) {
+        $rn = (Remove-Diacritics $rb.Current.Name).ToLower()
+        $needle = (Remove-Diacritics $visLabel).ToLower()
+        if ($rn -eq $needle -or $rn.StartsWith($needle + ' ') -or $rn.StartsWith($needle + '.')) { $visRadio = $rb; break }
+    }
+    if ($visRadio) {
+        Write-Host "    achei: '$($visRadio.Current.Name)'"
+        Set-WindowFocus $script:hwnd
+        try { $visRadio.SetFocus() } catch {}
+        Start-Sleep -Milliseconds 400
+        [System.Windows.Forms.SendKeys]::SendWait(' ')
+        Start-Sleep -Milliseconds 1000
+    } else {
+        Write-Host "    '$visLabel' nao achado - skip esse rascunho"
+        [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+        Start-Sleep -Seconds 3
+        # Confirma "Sair sem salvar" se aparecer
+        $sair = Find-UIA-Like "Sair" "Button" 2000
+        if ($sair) { Click-UIA $sair "Sair sem salvar" ; Start-Sleep -Seconds 2 }
+        continue
+    }
+
+    # === Espera verificacao ===
+    Write-Host "  Esperando verificacao YT acabar..."
+    $verifDeadline = (Get-Date).AddMinutes(10)
+    while ((Get-Date) -lt $verifDeadline) {
+        $hint = Find-UIA-Like "minutos restantes" $null 1500
+        if (-not $hint) { $hint = Find-UIA-Like "minuto restante" $null 800 }
+        if (-not $hint) { $hint = Find-UIA-Like "segundos restantes" $null 800 }
+        if (-not $hint) { Write-Host "    verificacao OK"; break }
+        Write-Host "    aguarda 15s ('$($hint.Current.Name)')"
+        Start-Sleep -Seconds 15
+    }
+
+    # === Click Publicar ===
+    Write-Host "  Clicando Publicar..."
+    Start-Sleep -Milliseconds 1500
+    $publicado = $false
+    # Tenta UIA Button "publicar" no rodape do dialog (Y > 200)
+    $publicar = Find-UIA-Like-InBounds "publicar" "Button" 200 9999 4000
+    if (-not $publicar) { $publicar = Find-UIA-Like-InBounds "salvar" "Button" 200 9999 2000 }
+    if ($publicar) {
+        $ip2 = $null
+        if ($publicar.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$ip2)) { $ip2.Invoke() } else { Click-UIA $publicar "Publicar" }
+        Start-Sleep -Seconds 4
+        $still = Find-UIA-Like "Visibilidade" "" 1500
+        if (-not $still) { Write-Host "    PUBLICADO (UIA)!"; $publicado = $true }
+    }
+    if (-not $publicado) {
+        # Fallback coord (igual upload-yt.ps1 step 10)
+        $rootEl = [System.Windows.Automation.AutomationElement]::RootElement
+        $wins = $rootEl.FindAll([System.Windows.Automation.TreeScope]::Children, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Window)))
+        $chromeWin = $null
+        foreach ($w in $wins) { if ($w.Current.Name -match 'Studio|YouTube' -and $w.Current.Name -match 'Chrome') { $chromeWin = $w; break } }
+        if ($chromeWin) {
+            $cr = $chromeWin.Current.BoundingRectangle
+            $px = [int]$cr.Right - 110
+            $py = [int]$cr.Bottom - 50
+            Write-Host "    fallback coord ($px, $py)"
+            [W32]::SetForegroundWindow($chromeWin.Current.NativeWindowHandle) | Out-Null
+            Start-Sleep -Milliseconds 400
+            [W32]::SetCursorPos($px, $py) | Out-Null
+            Start-Sleep -Milliseconds 200
+            [W32]::mouse_event(0x0002, 0, 0, 0, 0)
+            Start-Sleep -Milliseconds 80
+            [W32]::mouse_event(0x0004, 0, 0, 0, 0)
+            Start-Sleep -Seconds 5
+            $check2 = Find-UIA-Like "Visibilidade" "" 1500
+            if (-not $check2) { Write-Host "    PUBLICADO (coord)!"; $publicado = $true }
+        }
+    }
+
+    # === Handle modal "Publicar mesmo assim" ===
+    Start-Sleep -Seconds 2
+    $ainda = $null
+    foreach ($e in (Get-RootAE).FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+        try { if ($e.Current.Name -match 'Ainda estamos verificando' -and -not $e.Current.IsOffscreen) { $ainda = $e; break } } catch {}
+    }
+    if ($ainda) {
+        Write-Host "  Modal 'Ainda estamos verificando' - clicando 'Publicar mesmo assim'"
+        $btn = Find-UIA-Like "publicar mesmo assim" "" 3000
+        if ($btn) {
+            $ip3 = $null
+            if ($btn.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$ip3)) { $ip3.Invoke() } else { Click-UIA $btn "Publicar mesmo assim" }
+        } else {
+            $mr = $ainda.Current.BoundingRectangle
+            $px = [int]($mr.Right - 150); $py = [int]($mr.Bottom - 30)
+            Write-Host "    fallback coord modal ($px, $py)"
+            [W32]::SetCursorPos($px, $py) | Out-Null
+            Start-Sleep -Milliseconds 200
+            [W32]::mouse_event(0x0002, 0, 0, 0, 0); Start-Sleep -Milliseconds 80; [W32]::mouse_event(0x0004, 0, 0, 0, 0)
+        }
+        Start-Sleep -Seconds 5
+        $publicado = $true
+    }
+
+    if ($publicado) {
+        $published++
+        Write-Host "  +++ Rascunho #$n PUBLICADO ($published total) +++"
+        Snap "12-published-$n"
+    } else {
+        Write-Host "  Rascunho #$n NAO publicou - skipa"
+        Snap "fail-publish-$n"
+        # ESC + Sair sem salvar pra voltar pra lista
+        [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+        Start-Sleep -Seconds 2
+        $sair = Find-UIA-Like "Sair" "Button" 2000
+        if ($sair) { Click-UIA $sair "Sair sem salvar"; Start-Sleep -Seconds 2 }
+    }
+
+    # Aguarda lista atualizar
+    Start-Sleep -Seconds 5
+}
+
+# === Fecha Chrome ===
+Write-Host ""
+Write-Host "Fechando janela Chrome..."
+try {
+    [W32]::PostMessage($script:hwnd, 0x0010, 0, 0) | Out-Null  # WM_CLOSE
+    Start-Sleep -Seconds 2
+} catch {}
+
+# Remove lock
+Remove-Item $lockFile -ErrorAction SilentlyContinue
+
+Write-Host ""
+Write-Host "DRAFTS_PUBLISHED:$published"
+exit 0
