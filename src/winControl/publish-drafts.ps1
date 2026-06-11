@@ -222,6 +222,29 @@ for ($n = 1; $n -le $MaxToPublish; $n++) {
         continue
     }
 
+    # v1.3.23: espera verificacao YT acabar ANTES de Avancar.
+    # Patterns observados no rodape do dialog:
+    #   - "Tempo restante: N minutos" (upload ainda subindo)
+    #   - "minutos restantes" / "minuto restante" / "segundos restantes" (countdown verif)
+    #   - "As verificacoes estao demorando mais que o esperado" (verif lenta - aguardar igual)
+    # Se algum desses textos esta visivel, aguarda ate sumir ou max 10min.
+    Write-Host "  Aguardando verificacao YT..."
+    $verifDeadline = (Get-Date).AddMinutes(10)
+    $verifIter = 0
+    while ((Get-Date) -lt $verifDeadline) {
+        $verifIter++
+        $hint = Find-UIA-Like "minutos restantes" $null 1000
+        if (-not $hint) { $hint = Find-UIA-Like "minuto restante" $null 600 }
+        if (-not $hint) { $hint = Find-UIA-Like "segundos restantes" $null 600 }
+        if (-not $hint) { $hint = Find-UIA-Like "demorando mais que o esperado" $null 600 }
+        if (-not $hint) { $hint = Find-UIA-Like "verificacoes em andamento" $null 600 }
+        if (-not $hint) { Write-Host "    verificacao concluida apos $verifIter check(s)"; break }
+        Write-Host "    [$verifIter] aguarda 15s ('$($hint.Current.Name)')"
+        Start-Sleep -Seconds 15
+    }
+    if ((Get-Date) -ge $verifDeadline) { Write-Host "    AVISO: timeout 10min - segue mesmo assim" }
+    Snap "03-after-verif-wait-$n"
+
     # === Avancar ate Visibilidade ===
     Write-Host "  Avancando ate Visibilidade..."
     $maxAvancar = 6
@@ -230,7 +253,7 @@ for ($n = 1; $n -le $MaxToPublish; $n++) {
         $visRadio = Find-UIA-Like "Privado" "RadioButton" 1500
         if ($visRadio) { Write-Host "  Visibilidade alcancada apos $($i-1) Avancar(es)"; break }
         $avancar = Find-UIA-Like-InBounds "avancar" "Button" 200 9999 3000
-        if (-not $avancar) { Write-Host "  Avancar #$i nao achado"; break }
+        if (-not $avancar) { Write-Host "  Avancar #$i nao achado"; Snap "fail-no-avancar-${n}-${i}"; break }
         $invokePat = $null
         if ($avancar.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$invokePat)) {
             $invokePat.Invoke()
@@ -238,6 +261,7 @@ for ($n = 1; $n -le $MaxToPublish; $n++) {
             Click-UIA $avancar "Avancar #$i"
         }
         Start-Sleep -Milliseconds 2000
+        Snap "04-after-avancar-${n}-${i}"
     }
 
     # === Marcar visibility ===
@@ -257,11 +281,15 @@ for ($n = 1; $n -le $MaxToPublish; $n++) {
         Start-Sleep -Milliseconds 400
         [System.Windows.Forms.SendKeys]::SendWait(' ')
         Start-Sleep -Milliseconds 1000
+        Snap "05-after-vis-$n"
     } else {
-        Write-Host "    '$visLabel' nao achado - skip esse rascunho"
+        # v1.3.23: snap pra debug ANTES de sair
+        Write-Host "    '$visLabel' nao achado - listando RadioButtons disponiveis:"
+        Snap "fail-no-radio-$n"
+        $allRb = (Get-RootAE).FindAll([System.Windows.Automation.TreeScope]::Descendants, (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::RadioButton)))
+        foreach ($rb in $allRb) { try { Write-Host "      '$($rb.Current.Name)'" } catch {} }
         [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
         Start-Sleep -Seconds 3
-        # Confirma "Sair sem salvar" se aparecer
         $sair = Find-UIA-Like "Sair" "Button" 2000
         if ($sair) { Click-UIA $sair "Sair sem salvar" ; Start-Sleep -Seconds 2 }
         continue
