@@ -233,7 +233,7 @@ export function classifyError(errMsg) {
     return {
       kind: 'yt_n_challenge_failed',
       category: 'bug_app',
-      summary: 'yt-dlp falhou no n-challenge do YouTube (deno.exe ausente?)',
+      summary: 'yt-dlp nao achou formato YouTube (client tv_embedded morto / n-challenge)',
       fix: null,
     }
   }
