@@ -836,6 +836,22 @@ function closeWizard() {
   document.getElementById('wizard-overlay').classList.remove('open')
 }
 
+function looksLikeYoutubeVideoUrls(text) {
+  const lista = String(text || '').split('\n').map(s => s.trim()).filter(Boolean)
+  if (!lista.length) return false
+  return lista.every(u => {
+    if (/\/(@|c\/|channel\/|user\/|playlist\?)/i.test(u)) return false
+    return /(?:v=|\/shorts\/|youtu\.be\/)([\w-]{11})/.test(u) || /^[\w-]{11}$/.test(u)
+  })
+}
+
+function wizDetectYoutubeUrlType(text) {
+  if (!looksLikeYoutubeVideoUrls(text)) return
+  if (wizardData.youtubeSourceType === 'single') return
+  wizardData.youtubeSourceType = 'single'
+  renderWizardStep()
+}
+
 // Captura o que tá no DOM nos campos wiz-* e salva no wizardData.
 // Chamado antes de re-renderizar pra não perder o que o user digitou.
 function syncDOMToWizard() {
@@ -955,7 +971,7 @@ function getWizardBody(step) {
         </div>
         <div class="form-group">
           <label>${wizardData.youtubeSourceType==='single' ? 'URLs de vídeos' : 'Canais do YouTube'} <span class="text-muted">(um por linha)</span></label>
-          <textarea id="wiz-urls" rows="3" placeholder="${wizardData.youtubeSourceType==='single' ? 'https://youtu.be/abcdef12345&#10;https://www.youtube.com/watch?v=xyz789' : 'https://www.youtube.com/@canal1/videos&#10;https://www.youtube.com/@canal2/videos'}">${esc(wizardData.sourceUrls)}</textarea>
+          <textarea id="wiz-urls" rows="3" placeholder="${wizardData.youtubeSourceType==='single' ? 'https://youtu.be/abcdef12345&#10;https://www.youtube.com/watch?v=xyz789' : 'https://www.youtube.com/@canal1/videos&#10;https://www.youtube.com/@canal2/videos'}" oninput="wizDetectYoutubeUrlType(this.value)">${esc(wizardData.sourceUrls)}</textarea>
         </div>` : ''}
 
       ${['instagram','tiktok'].includes(wizardData.source) ? `
@@ -1437,7 +1453,10 @@ function collectWizardStep(step) {
       wizardData.sourceUrls    = document.getElementById('wiz-urls')?.value.trim() || ''
       wizardData.sourceHandles = document.getElementById('wiz-handles')?.value.trim() || ''
       wizardData.sourceFolder  = document.getElementById('wiz-folder')?.value.trim() || ''
-      if (wizardData.source === 'youtube' && !wizardData.sourceUrls) { toast('Adicione pelo menos uma URL de canal', 'err'); return false }
+      if (wizardData.source === 'youtube' && !wizardData.sourceUrls) { toast('Adicione pelo menos uma URL de canal ou vídeo', 'err'); return false }
+      if (wizardData.source === 'youtube' && looksLikeYoutubeVideoUrls(wizardData.sourceUrls)) {
+        wizardData.youtubeSourceType = 'single'
+      }
       if (['instagram','tiktok'].includes(wizardData.source) && !wizardData.sourceHandles) { toast('Adicione pelo menos um perfil', 'err'); return false }
       // Filtros — duração tem defaults amplos (sem filtro efetivo); sem UI.
       wizardData.filterMinDur         = wizardData.filterMinDur || 10

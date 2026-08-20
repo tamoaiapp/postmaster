@@ -72,6 +72,7 @@ postmaster/
 | Joyride typo `__portal` IG | v1.0.37 | — |
 | IG rejeita vídeo, ficava esperando Avançar | v1.0.40 | `m.includes('ig_rejected_video')` → kind `ig_rejected_video` |
 | Botão Next/Avançar não encontrado | v1.0.40 | kind `ig_next_button_not_found` |
+| URL de vídeo colada no campo de canal | v1.3.29 | auto-roteia pra `buscarVideoUnico` (não joga `config_youtube_url_is_video`) |
 
 Lista canônica de classificações em [`src/supportAgent.mjs`](src/supportAgent.mjs) função `classifyError()`.
 

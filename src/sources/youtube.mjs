@@ -9,6 +9,8 @@ import path from 'path'
 import ffmpegStaticOriginal from 'ffmpeg-static'
 import sharp from 'sharp'
 import { getVideoDimensions } from '../faceTrack.mjs'
+import { extractVideoId, urlsLookLikeYoutubeVideos } from './youtubeUrl.mjs'
+export { extractVideoId, urlsLookLikeYoutubeVideos }
 
 const execAsync = promisify(exec)
 
@@ -113,17 +115,20 @@ export async function buscarVideoYoutube(urls, stateFile, log, filtros = {}, dat
   const lista    = urls.split('\n').map(s => s.trim()).filter(Boolean)
   if (!lista.length) throw new Error('Nenhuma URL de canal configurada')
 
+  // v1.3.29: se colaram URL de vídeo (watch/youtu.be/shorts) no campo de canal,
+  // trata como lista de vídeos únicos em vez de estourar. 43/44 erros de produção
+  // no bridge eram exatamente isso.
+  if (urlsLookLikeYoutubeVideos(urls)) {
+    log('🎬 URL de vídeo detectada no campo de canal — tratando como vídeo único')
+    const one = await buscarVideoUnico(urls, stateFile, log, dataDir)
+    return one ? [one] : []
+  }
+
   const idx    = (state.ultimoCanal || 0) % lista.length
   const canal  = lista[idx]
   state.ultimoCanal = idx + 1
   saveState(stateFile, state)
   log(`📺 Canal: ${canal}`)
-
-  // Valida que o URL eh de CANAL e nao de video especifico. Erro comum:
-  // cliente cola youtube.com/watch?v=XXX em vez de youtube.com/@nomedocanal.
-  if (/youtube\.com\/watch\?v=|youtu\.be\/(?!@)/.test(canal) && !/\/(@|c\/|channel\/|user\/|playlist\?)/.test(canal)) {
-    throw new Error(`config_youtube_url_is_video: voce colou um link de video especifico no campo de canal. Use o link do CANAL (ex: youtube.com/@nomedocanal). URL invalida: ${canal.slice(0, 80)}`)
-  }
 
   // ATENÇÃO: NÃO passar --js-runtimes em Electron empacotado!
   // process.execPath aponta para PostMaster.exe (não node.exe), então o yt-dlp
@@ -157,16 +162,6 @@ export async function buscarVideoYoutube(urls, stateFile, log, filtros = {}, dat
 export const PLATFORM_LIMITS = {
   instagram: 90, // Reels max 90s
   tiktok: 600,   // 10min, mas pra viral o ideal eh ate 60s
-}
-
-// v1.2.0: extrai videoId de qualquer URL aceita pelo YT
-export function extractVideoId(url) {
-  if (!url) return null
-  const m1 = String(url).match(/(?:v=|\/shorts\/|youtu\.be\/)([\w-]{11})/)
-  if (m1) return m1[1]
-  // Fallback: se o cara colou so o ID (11 chars)
-  const m2 = String(url).match(/^([\w-]{11})$/)
-  return m2 ? m2[1] : null
 }
 
 // v1.2.0: busca proxima URL de video unico ainda nao postada

@@ -151,7 +151,7 @@ export function classifyError(errMsg) {
       kind: 'config_youtube_url_is_video',
       category: 'cliente_config',
       summary: 'Cliente colou link de video especifico no campo de canal',
-      fix: 'Trocar pelo link do CANAL (ex: youtube.com/@nomedocanal — sem o /watch?v=...). Edita a automacao em "Automacoes" e cola a URL do canal todo.',
+      fix: 'A partir da 1.3.29 o app aceita link de video nesse campo (posta aquele video uma vez). Se ainda aparece este erro, atualize o app. Pra puxar o canal inteiro, use youtube.com/@nomedocanal.',
     }
   }
   if (m.includes('nenhuma url de canal configurada')) {

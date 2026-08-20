@@ -13,6 +13,7 @@ import {
   buscarVideoYoutube, baixarVideoYoutube, downloadThumbnail,
   converterParaReel, loadState, marcarPostado, marcarFalhou,
   marcarTrechoUsado, proximoVideoComEspaco, calcGapsLivres,
+  urlsLookLikeYoutubeVideos,
 } from './sources/youtube.mjs'
 import { smartCutYouTube } from './smartCut.mjs'
 import { applyAutoEdit } from './autoEditor.mjs'
@@ -89,9 +90,13 @@ export default async function jobRunner(job, dataDir, log) {
       excludeRanges = reuse.excludeRanges
       videoSource = 'reaproveitado'
       log(`♻️  Reaproveitando vídeo (${excludeRanges.length} trecho(s) já usado(s))`)
-    } else if (job.source === 'youtube' && job.youtubeSourceType === 'single') {
+    } else if (job.source === 'youtube' && (job.youtubeSourceType === 'single' || urlsLookLikeYoutubeVideos(job.sourceUrls || ''))) {
       // v1.2.0: modo "video unico" — usuario colou URLs de videos especificos
+      // v1.3.29: também auto-detecta watch/youtu.be colado no campo de canal
       // Pula scrape de canal, pega proximo video da lista nao-postado
+      if (job.youtubeSourceType !== 'single') {
+        log('🎬 URL de vídeo detectada — tratando como vídeo único (não como canal)')
+      }
       liveView.updateStatus(liveJobId, 'Buscando video unico')
       const { buscarVideoUnico } = await import('./sources/youtube.mjs')
       const videoUnico = await buscarVideoUnico(job.sourceUrls || '', stateFile, log, dataDir)
