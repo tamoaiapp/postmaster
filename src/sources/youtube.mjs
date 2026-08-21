@@ -184,7 +184,7 @@ export async function buscarVideoUnico(urls, stateFile, log, dataDir = null) {
     log(`🎬 Video unico: ${u}`)
     try {
       const { stdout } = await execAsync(
-        `${YTDLP} ${await getYoutubeCookiesArg(log, dataDir)} --skip-download --print "%(id)s\t%(duration)s\t%(title)s" "https://www.youtube.com/watch?v=${id}"`,
+        `${YTDLP} ${JS_RUNTIMES_ARG} ${await getYoutubeCookiesArg(log, dataDir)} --extractor-args "youtube:player_client=android,ios,web" --skip-download --print "%(id)s\t%(duration)s\t%(title)s" "https://www.youtube.com/watch?v=${id}"`,
         { timeout: 60000, windowsHide: true }
       )
       const parts = stdout.trim().split('\t')

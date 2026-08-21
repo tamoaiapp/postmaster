@@ -76,6 +76,10 @@ postmaster/
 | yt-dlp `tv_embedded` dropado → "Download falhou" / format not available | v1.3.30 | player_client=android,ios,web + `-f 18/22/bv*[height<=720]+ba/b` |
 | TikTok post usa chrome-headless-shell (Playwright 1.60) → upload bloqueado | v1.3.31 | poster passa `getChromiumExe()` (chrome.exe full, igual IG) |
 | TikTok source: webpage 1.4KB / "universal data for rehydration" | v1.3.31 | `--referer https://www.tiktok.com/` + retry 3x |
+| IG poster UA 124 vs Chromium 148 | v1.3.32 | UA Chrome/148 + locale pt-BR |
+| IG CSS `[data-test-id=overlay]` escondia dialog nativo | v1.3.32 | so joyride, igual TikTok |
+| IG yt-dlp `-f best[ext=mp4]/best` | v1.3.32 | fallback `bv*+ba` + Referer |
+| YT metadata de video unico sem android client | v1.3.32 | `player_client=android,ios,web` no `--print` |
 
 Lista canônica de classificações em [`src/supportAgent.mjs`](src/supportAgent.mjs) função `classifyError()`.
 

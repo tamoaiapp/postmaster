@@ -107,7 +107,7 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
         if (skipTexts.some(x => t === x)) { try { el.click() } catch {} }
       }
       // 3. Remove overlays de tour visualmente (cobre 1 hyphen E 2 underscores — TikTok mistura)
-      document.querySelectorAll('#react-joyride-portal, #react-joyride__portal, .react-joyride__overlay, [data-test-id="overlay"]').forEach(el => { try { el.remove() } catch {} })
+      document.querySelectorAll('#react-joyride-portal, #react-joyride__portal, .react-joyride__overlay').forEach(el => { try { el.remove() } catch {} })
       // 4. SO remove portals que NAO contem o botao Post (pra nao quebrar upload em andamento)
       document.querySelectorAll('[data-floating-ui-portal]').forEach(el => {
         const text = (el.innerText || '').toLowerCase()
@@ -240,7 +240,7 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
         try { el.remove() } catch {}
       })
       // 3. Remove tour onboarding react-joyride (overlay transparente que intercepta clicks)
-      document.querySelectorAll('#react-joyride-portal, .react-joyride__overlay, [data-test-id="overlay"]').forEach(el => {
+      document.querySelectorAll('#react-joyride-portal, .react-joyride__overlay').forEach(el => {
         try { el.remove() } catch {}
       })
       // 4. Remove qualquer overlay generico fixo

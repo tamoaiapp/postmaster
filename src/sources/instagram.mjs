@@ -94,7 +94,8 @@ export async function buscarVideoInstagram(handles, stateFile, log, filtros = {}
   const ctx = await browser.newContext({
     storageState: sessionFile,
     viewport: { width: 1280, height: 900 },
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+    locale: 'pt-BR',
   })
   const page = await ctx.newPage()
 
@@ -176,7 +177,7 @@ export async function baixarVideoInstagram(video, downloadsDir, prefix, log, dat
   for (const url of urls) {
     try {
       await execAsync(
-        `${YTDLP} --cookies "${cookies}" ${ffmpegArg} -f "best[ext=mp4]/best" -o "${out}" "${url}"`,
+        `${YTDLP} --cookies "${cookies}" ${ffmpegArg} --referer "https://www.instagram.com/" -f "best[ext=mp4]/best/bv*+ba/b" --merge-output-format mp4 -o "${out}" "${url}"`,
         { timeout: 180000, windowsHide: true }
       )
       const files = fs.readdirSync(downloadsDir).filter(f => f.startsWith(`${prefix}_${ts}`) && f.endsWith('.mp4'))

@@ -19,11 +19,14 @@ export async function postReelInstagram({ account, videoPath, caption, dataDir, 
     headless: process.env.PM_HEADLESS === 'false' ? false : true,
     executablePath: getChromiumExe() || undefined,
     args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
+    ignoreDefaultArgs: ['--enable-automation'],
   })
   const ctx = await browser.newContext({
     storageState: sessionFile,
     viewport: { width: 1280, height: 900 },
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    // v1.3.32: Chromium bundlado e Chrome 148 — UA 124 gerava fingerprint cruzado
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+    locale: 'pt-BR',
   })
   await ctx.addInitScript(() => {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
@@ -62,9 +65,11 @@ export async function postReelInstagram({ account, videoPath, caption, dataDir, 
   // Sem isso, basta o React re-criar o overlay milissegundos depois do el.remove() pra
   // travar o proximo click (problema observado no TikTok do cliente em 31/05).
   const installAntiOverlayCss = async () => {
+    // v1.3.32: NAO esconder [data-test-id="overlay"] — no TikTok isso cobria
+    // o modal nativo de publicacao. Aqui so joyride/tour.
     await page.addStyleTag({ content: `
       #react-joyride-portal, #react-joyride__portal,
-      .react-joyride__overlay, [data-test-id="overlay"],
+      .react-joyride__overlay,
       .react-joyride__spotlight, .react-joyride__beacon,
       .react-joyride__tooltip {
         display: none !important;
@@ -78,7 +83,7 @@ export async function postReelInstagram({ account, videoPath, caption, dataDir, 
   const dispensarOverlays = async () => {
     await installAntiOverlayCss()
     await page.evaluate(() => {
-      document.querySelectorAll('#react-joyride-portal, #react-joyride__portal, .react-joyride__overlay, [data-test-id="overlay"]').forEach(el => { try { el.remove() } catch {} })
+      document.querySelectorAll('#react-joyride-portal, #react-joyride__portal, .react-joyride__overlay').forEach(el => { try { el.remove() } catch {} })
       document.querySelectorAll('[role="tooltip"]').forEach(el => { try { el.remove() } catch {} })
       // Botoes "Pular tour", "Got it", "Skip"
       const skipTexts = ['pular', 'skip', 'got it', 'entendi', 'ok, entendi', 'fechar tour']
@@ -458,7 +463,7 @@ async function clickNext(page, log, timeout = 12000) {
   while (Date.now() < deadline) {
     // Remove overlays react-joyride antes de cada tentativa (cobre - e __ — TikTok usa um, IG usa outro)
     await page.evaluate(() => {
-      document.querySelectorAll('#react-joyride-portal, #react-joyride__portal, .react-joyride__overlay, [data-test-id="overlay"]').forEach(el => { try { el.remove() } catch {} })
+      document.querySelectorAll('#react-joyride-portal, #react-joyride__portal, .react-joyride__overlay').forEach(el => { try { el.remove() } catch {} })
     }).catch(() => {})
     const clicked = await page.evaluate(() => {
       const dialog = document.querySelector('[role="dialog"]')
