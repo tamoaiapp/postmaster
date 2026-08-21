@@ -80,6 +80,7 @@ postmaster/
 | IG CSS `[data-test-id=overlay]` escondia dialog nativo | v1.3.32 | so joyride, igual TikTok |
 | IG yt-dlp `-f best[ext=mp4]/best` | v1.3.32 | fallback `bv*+ba` + Referer |
 | YT metadata de video unico sem android client | v1.3.32 | `player_client=android,ios,web` no `--print` |
+| Cliente 1.5.0 nao pega update 1.3.x (semver) | v1.6.0 | bump pra cima de 1.5.0 |
 
 Lista canônica de classificações em [`src/supportAgent.mjs`](src/supportAgent.mjs) função `classifyError()`.
 

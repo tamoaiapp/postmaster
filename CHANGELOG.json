@@ -3,6 +3,15 @@
     "_doc":  "Lista de versoes com os kinds de erro que cada uma corrige. O app baixa esse JSON, verifica se o cliente teve algum desses erros recentemente, e mostra toast quando o auto-update aplicar o fix. Fonte: src/supportAgent.mjs classifyError().",
     "versions":  [
                      {
+                         "version":  "1.6.0",
+                         "fixed":  [
+                                       {
+                                           "kind":  "stale_high_version",
+                                           "message":  "Clientes presos em 1.5.0 (maior que 1.3.x) nao recebiam auto-update. 1.6.0 passa na frente e leva os fixes de YouTube/TikTok/Instagram."
+                                       }
+                                   ]
+                     },
+                     {
                          "version":  "1.3.32",
                          "fixed":  [
                                        {
