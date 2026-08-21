@@ -237,6 +237,15 @@ export function classifyError(errMsg) {
       fix: null,
     }
   }
+  if (m.includes('universal data for rehydration') ||
+      (m.includes('unexpected response') && m.includes('webpage'))) {
+    return {
+      kind: 'tt_download_webpage_blocked',
+      category: 'bug_app',
+      summary: 'yt-dlp bloqueado no download TikTok (webpage Akamai / sem Referer)',
+      fix: null,
+    }
+  }
   if (m.includes('tt_post_button_failed') ||
       m.includes('botão post não encontrado') || m.includes('botao post nao encontrado') ||
       m.includes('botão post não conseguiu') || m.includes('botao post nao conseguiu')) {

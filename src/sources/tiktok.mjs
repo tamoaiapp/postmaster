@@ -26,6 +26,21 @@ function resolveYtDlp() {
 }
 const YTDLP = resolveYtDlp()
 
+async function execYtDlpWithRetry(cmd, opts, log, tries = 3) {
+  let last
+  for (let i = 1; i <= tries; i++) {
+    try {
+      return await execAsync(cmd, opts)
+    } catch (e) {
+      last = e
+      const msg = String(e?.message || e).split('\n')[0].slice(0, 120)
+      log?.(`   yt-dlp TikTok tentativa ${i}/${tries} falhou: ${msg}`)
+      if (i < tries) await new Promise(r => setTimeout(r, 1500 * i))
+    }
+  }
+  throw last
+}
+
 function loadState(file) {
   try {
     let raw = fs.readFileSync(file, 'utf-8')
@@ -69,10 +84,14 @@ export async function buscarVideoTiktok(handles, stateFile, log, filtros = {}, d
   // Cookies opcionais (TikTok publico funciona sem, mas tendo ajuda contra rate-limit)
   const cookies = dataDir ? getCookiesForPlatform('tiktok', dataDir) : null
   const cookiesArg = cookies ? `--cookies "${cookies}"` : ''
+  // v1.3.31: sem Referer o Akamai devolve pagina de ~1.4KB e o yt-dlp cai
+  // com "Unexpected response from webpage request" / "universal data for rehydration".
+  const refererArg = '--referer "https://www.tiktok.com/"'
 
-  const { stdout } = await execAsync(
-    `${YTDLP} ${cookiesArg} --flat-playlist --playlist-end ${maxVideos} --print "%(id)s\t%(duration)s\t%(title)s" "${url}"`,
-    { timeout: 60000, windowsHide: true }
+  const { stdout } = await execYtDlpWithRetry(
+    `${YTDLP} ${cookiesArg} ${refererArg} --flat-playlist --playlist-end ${maxVideos} --print "%(id)s\t%(duration)s\t%(title)s" "${url}"`,
+    { timeout: 60000, windowsHide: true },
+    log,
   )
 
   const kwInclude = keywordInclude ? keywordInclude.split(',').map(k => k.trim().toLowerCase()).filter(Boolean) : []
@@ -105,9 +124,11 @@ export async function baixarVideoTiktok(video, downloadsDir, prefix, log, dataDi
   const url = `https://www.tiktok.com/@${video.sourceHandle}/video/${video.id}`
 
   log('⬇️ Baixando do TikTok...')
-  await execAsync(
-    `${YTDLP} ${cookiesArg} ${ffmpegArg} -f "best[ext=mp4]/best" -o "${out}" "${url}"`,
-    { timeout: 180000, windowsHide: true }
+  const refererArg = '--referer "https://www.tiktok.com/"'
+  await execYtDlpWithRetry(
+    `${YTDLP} ${cookiesArg} ${ffmpegArg} ${refererArg} -f "best[ext=mp4]/best/bv*+ba/b" --merge-output-format mp4 -o "${out}" "${url}"`,
+    { timeout: 180000, windowsHide: true },
+    log,
   )
 
   const files = fs.readdirSync(downloadsDir)

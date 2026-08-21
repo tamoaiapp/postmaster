@@ -74,6 +74,8 @@ postmaster/
 | Botão Next/Avançar não encontrado | v1.0.40 | kind `ig_next_button_not_found` |
 | URL de vídeo colada no campo de canal | v1.3.29 | auto-roteia pra `buscarVideoUnico` (não joga `config_youtube_url_is_video`) |
 | yt-dlp `tv_embedded` dropado → "Download falhou" / format not available | v1.3.30 | player_client=android,ios,web + `-f 18/22/bv*[height<=720]+ba/b` |
+| TikTok post usa chrome-headless-shell (Playwright 1.60) → upload bloqueado | v1.3.31 | poster passa `getChromiumExe()` (chrome.exe full, igual IG) |
+| TikTok source: webpage 1.4KB / "universal data for rehydration" | v1.3.31 | `--referer https://www.tiktok.com/` + retry 3x |
 
 Lista canônica de classificações em [`src/supportAgent.mjs`](src/supportAgent.mjs) função `classifyError()`.
 

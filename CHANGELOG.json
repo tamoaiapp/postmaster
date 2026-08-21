@@ -3,6 +3,19 @@
     "_doc":  "Lista de versoes com os kinds de erro que cada uma corrige. O app baixa esse JSON, verifica se o cliente teve algum desses erros recentemente, e mostra toast quando o auto-update aplicar o fix. Fonte: src/supportAgent.mjs classifyError().",
     "versions":  [
                      {
+                         "version":  "1.3.31",
+                         "fixed":  [
+                                       {
+                                           "kind":  "tt_post_button_failed",
+                                           "message":  "Postagem no TikTok falhava porque o Playwright 1.60 em headless usa chrome-headless-shell (o TikTok detecta e bloqueia). Agora usa o Chrome cheio, igual o Instagram."
+                                       },
+                                       {
+                                           "kind":  "tt_download_webpage_blocked",
+                                           "message":  "Baixar video de perfil TikTok falhava com Unexpected response / universal data. Agora manda Referer e tenta 3 vezes."
+                                       }
+                                   ]
+                     },
+                     {
                          "version":  "1.3.30",
                          "fixed":  [
                                        {

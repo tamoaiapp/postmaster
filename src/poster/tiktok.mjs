@@ -6,6 +6,7 @@ import { chromium } from 'playwright'
 import fs from 'fs'
 import path from 'path'
 import * as liveView from '../liveView.mjs'
+import { getChromiumExe } from '../playwrightExe.mjs'
 
 const delay = ms => new Promise(r => setTimeout(r, ms))
 
@@ -13,16 +14,21 @@ export async function postVideoTikTok({ account, videoPath, caption, dataDir, lo
   const sessionFile = path.join(dataDir, 'sessions', `tk-${account}.json`)
   if (!fs.existsSync(sessionFile)) throw new Error(`Sessão não encontrada para @${account}. Faça login primeiro.`)
 
-  // NAO passa executablePath — quando passamos explicitamente, Playwright
-  // trata como "Chrome do user" e PARA de aplicar os args internos de
-  // bypass de detecao automatica (que sao DIFERENTES do --disable-blink-features
-  // que passamos manualmente). Sem esses args internos, TikTok detecta bot e
-  // bloqueia o upload silenciosamente — provado isolando em teste local.
-  // main.js seta PLAYWRIGHT_BROWSERS_PATH apontando pro chromium-XXXX bundlado.
+  // v1.3.31: Playwright 1.49+ com headless:true usa chrome-headless-shell
+  // (binario separado). TikTok detecta o shell e bloqueia o upload
+  // silenciosamente — root cause documentado em playwrightExe.mjs.
+  // Instagram ja passava getChromiumExe() (chrome.exe full). TikTok nao.
+  // executablePath aponta pro Chromium bundlado (mesmo 148 do CI), nao o
+  // Chrome do user. ignoreDefaultArgs tira --enable-automation.
+  const chromePath = getChromiumExe()
   const browser = await chromium.launch({
     headless: process.env.PM_HEADLESS === 'false' ? false : true,
+    executablePath: chromePath || undefined,
     args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
+    ignoreDefaultArgs: ['--enable-automation'],
   })
+  if (chromePath) log(`   chrome: ${chromePath}`)
+  else log('   ⚠️ chrome.exe full nao achado — Playwright vai de headless-shell (TikTok detecta)')
   const ctx = await browser.newContext({
     storageState: sessionFile,
     viewport: { width: 1280, height: 900 },
