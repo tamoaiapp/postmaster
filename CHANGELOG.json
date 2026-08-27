@@ -3,6 +3,19 @@
     "_doc":  "Lista de versoes com os kinds de erro que cada uma corrige. O app baixa esse JSON, verifica se o cliente teve algum desses erros recentemente, e mostra toast quando o auto-update aplicar o fix. Fonte: src/supportAgent.mjs classifyError().",
     "versions":  [
                      {
+                         "version":  "1.6.2",
+                         "fixed":  [
+                                       {
+                                           "kind":  "perf_ia_lazy",
+                                           "message":  "App estava inflado: baixava (~400MB) e carregava o modelo de IA na RAM em TODO boot, mesmo pra quem usa legenda template/video (nunca usa IA). Agora o modelo so baixa/carrega sob demanda, na 1a legenda 'ai' ou chyron. Boot mais leve, menos RAM e menos rede."
+                                       },
+                                       {
+                                           "kind":  "perf_liveview_minimizado",
+                                           "message":  "Live View parava de tirar screenshot do navegador so quando desligado. Agora tambem pausa quando a janela esta minimizada (ninguem esta vendo) — economiza CPU durante as postagens."
+                                       }
+                                   ]
+                     },
+                     {
                          "version":  "1.6.1",
                          "fixed":  [
                                        {

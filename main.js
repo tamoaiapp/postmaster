@@ -418,29 +418,24 @@ ipcMain.handle('settings:set', async (_, patch) => {
 app.on('before-quit', () => { aiManager?.stopServer() })
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
 
-// ── IA embarcada ─────────────────────────────────────────────────────────────
+// ── IA embarcada (LAZY desde v1.6.2) ─────────────────────────────────────────
+// Antes: o boot baixava (~400MB de rede) e carregava o Qwen na RAM (~400MB) SEMPRE,
+// mesmo pra quem usa legenda template/vídeo/nenhuma — que nunca toca a IA. Isso
+// inflava CPU/rede/RAM à toa. Agora o boot NÃO baixa nem carrega nada: o download+
+// load acontece sob demanda na 1ª geração que precisar (aiManager.ensureReady,
+// chamado por gerarCaption/gerarChyron/_complete). Aqui só reportamos o status.
 async function startEmbeddedAI() {
-  const sendAI  = (event, data) => { if (win) win.webContents.send(event, data) }
-  const onLog   = msg => sendAI('ai:log', msg)
-
+  const sendAI = (event, data) => { if (win) win.webContents.send(event, data) }
   try {
     const modelPath = path.join(DATA_DIR, 'model.gguf')
     aiManager.setModelPath(modelPath)
-
-    // 1. Baixar modelo se necessário
-    if (!await aiManager.modelIsValid()) {
-      sendAI('ai:status', { ok: false, modelReady: false, downloading: true })
-      onLog('Primeira execução — configurando IA embarcada (pode demorar alguns minutos)...')
-      await aiManager.downloadModel(onLog)
-    }
-
-    // 2. Carregar modelo
-    sendAI('ai:status', { ok: false, modelReady: false, downloading: false })
-    await aiManager.loadModel(onLog)
-    sendAI('ai:status', { ok: true, modelReady: true })
+    // Chip "IA pronta" se o modelo já foi baixado num run anterior (fica disponível
+    // pra carregar sob demanda). Se não, fica neutro — carrega na 1ª legenda 'ai'.
+    const jaBaixado = await aiManager.modelIsValid()
+    sendAI('ai:status', { ok: true, modelReady: jaBaixado, lazy: true })
   } catch (e) {
     sendAI('ai:status', { ok: false, modelReady: false, error: e.message })
-    console.error('Erro ao iniciar IA embarcada:', e)
+    console.error('Erro ao checar IA embarcada:', e)
   }
 }
 

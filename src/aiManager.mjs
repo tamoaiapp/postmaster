@@ -151,8 +151,21 @@ function stripForbiddenOutlets(text) {
   return cleaned.trim()
 }
 
+// v1.6.2: prepara o modelo SOB DEMANDA (lazy). Antes o main.js baixava (~400MB de
+// rede) e carregava o Qwen na RAM (~400MB) em TODO boot — puro desperdício pra quem
+// usa legenda template/vídeo/nenhuma, que nunca chama a IA. Agora baixa/carrega só
+// na 1ª geração que realmente precisar (legenda 'ai' ou chyron).
+export async function ensureReady(onLog) {
+  if (_model) return _model
+  if (!(await modelIsValid())) {
+    onLog?.('Baixando motor de IA (1ª vez, ~400MB)...')
+    await downloadModel(onLog)
+  }
+  return loadModel(onLog)
+}
+
 export async function gerarCaption(titulo, nicho = 'conteúdo geral') {
-  if (!_model) throw new Error('Motor de IA não carregado')
+  await ensureReady() // lazy: baixa+carrega na 1ª vez (antes: throw se não carregado)
 
   const { LlamaChatSession } = await import('node-llama-cpp')
   // Limpa o título antes de mandar pra IA — evita que ela "puxe" o nome do veículo
@@ -216,6 +229,7 @@ Responda SO a legenda final. Sem prefixo, sem aspas.`
 // v1.3.9: gera headline curto estilo G1/CNN pra mostrar overlay no video.
 // Output: 1 frase ALL-CAPS, max 65 chars (~2 linhas de chyron)
 export async function gerarChyron(titulo, transcricao = '', nicho = '') {
+  try { await ensureReady() } catch {} // lazy; se falhar, cai no fallback abaixo
   if (!_model) {
     // Fallback: usa titulo cru (uppercased, truncado)
     return String(titulo || '').toUpperCase().slice(0, 60)
@@ -288,9 +302,7 @@ export function stopServer() {
 // "jobRunner is not a function". Pra padronizar, exponho objeto com .get()
 // e .complete() que reusa o _model ja carregado.
 async function _complete(prompt, { maxTokens = 250 } = {}) {
-  if (!_model) {
-    try { await loadModel() } catch { return '' }
-  }
+  try { await ensureReady() } catch { return '' } // lazy: baixa+carrega sob demanda
   if (!_model) return ''
   const { LlamaChatSession } = await import('node-llama-cpp')
   const ctx = await _model.createContext({ contextSize: 1024 })

@@ -116,6 +116,9 @@ function startCaptureLoop() {
     if (!enabled) return // OFF — não captura nada (economiza CPU/RAM)
     if (sessions.size === 0) return
     if (!mainWindow || mainWindow.isDestroyed()) return
+    // v1.6.2: janela minimizada = ninguém está vendo o Live View. Screenshot do
+    // Chromium a cada 1,5s + encode JPEG + IPC é CPU jogada fora nesse caso.
+    if (mainWindow.isMinimized?.()) return
     // Captura todas em paralelo
     await Promise.all([...sessions.entries()].map(([id, s]) => captureFrame(id, s)))
   }, FRAME_INTERVAL_MS)
