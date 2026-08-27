@@ -411,6 +411,25 @@ export function marcarFalhou(stateFile, id) {
   f.add(id); s.falhou = [...f].slice(-200); saveState(stateFile, s)
 }
 
+// ── Contador de tentativas de POSTAGEM (falha transitória vs permanente) ──────
+// v1.6.1: um blip de rede (page.goto timeout, plataforma lenta) NÃO deve queimar
+// o vídeo pra sempre via marcarFalhou (bug "posta metade dos vídeos"). Conta as
+// tentativas por vídeo; o jobRunner só marca FALHOU depois de esgotar o teto.
+export function registrarTentativaPost(stateFile, id) {
+  const s = loadState(stateFile)
+  s.tentativasPost = s.tentativasPost || {}
+  s.tentativasPost[id] = (s.tentativasPost[id] || 0) + 1
+  saveState(stateFile, s)
+  return s.tentativasPost[id]
+}
+export function limparTentativasPost(stateFile, id) {
+  const s = loadState(stateFile)
+  if (s.tentativasPost && s.tentativasPost[id] != null) {
+    delete s.tentativasPost[id]
+    saveState(stateFile, s)
+  }
+}
+
 // ── Tracking de trechos usados (reaproveitamento de vídeo) ────────────────────
 // Permite cortar trechos diferentes do MESMO vídeo em ciclos sucessivos,
 // sem sobrepor, até esgotar o vídeo.

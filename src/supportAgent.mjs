@@ -256,6 +256,32 @@ export function classifyError(errMsg) {
       fix: null,
     }
   }
+
+  // ── Falhas TRANSITÓRIAS de postagem (antes eram INVISÍVEIS na telemetria) ──
+  // v1.6.1: causa nº1 do "posta metade dos vídeos". page.goto/navegação estourava
+  // timeout (rede lenta OU vários jobs subindo Chromium em paralelo) e o app
+  // marcava o vídeo como FALHOU pra sempre — mas classifyError não reconhecia a
+  // mensagem, então NUNCA registrava no errors.jsonl. Agora registra.
+  if (m.includes('post_confirm_timeout') || m.includes('post_failed_silent') ||
+      m.includes('não ficou enabled') || m.includes('nao ficou enabled') ||
+      (m.includes('demorou') && m.includes('processando'))) {
+    return {
+      kind: 'post_confirm_timeout',
+      category: 'cliente_externo',
+      summary: 'Plataforma não confirmou a publicação no tempo (upload/processamento server-side lento). v1.6.1 retenta em vez de queimar o vídeo.',
+      fix: null,
+    }
+  }
+  if (m.includes('page.goto') || m.includes('navigating to') || m.includes('net::') ||
+      m.includes('econnreset') || m.includes('etimedout') ||
+      (m.includes('timeout') && (m.includes('exceeded') || m.includes('locator.')))) {
+    return {
+      kind: 'post_nav_timeout',
+      category: 'cliente_externo',
+      summary: 'Timeout de navegação/carregamento ao postar (rede lenta ou jobs em paralelo). v1.6.1 serializa os jobs e retenta em vez de queimar o vídeo.',
+      fix: null,
+    }
+  }
   return null
 }
 

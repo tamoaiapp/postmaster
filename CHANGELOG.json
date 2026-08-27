@@ -3,6 +3,19 @@
     "_doc":  "Lista de versoes com os kinds de erro que cada uma corrige. O app baixa esse JSON, verifica se o cliente teve algum desses erros recentemente, e mostra toast quando o auto-update aplicar o fix. Fonte: src/supportAgent.mjs classifyError().",
     "versions":  [
                      {
+                         "version":  "1.6.1",
+                         "fixed":  [
+                                       {
+                                           "kind":  "post_nav_timeout",
+                                           "message":  "Causa nº1 do 'posta so metade dos videos': jobs rodavam em PARALELO, subiam varios Chromium juntos e estouravam page.goto por falta de CPU/rede. Agora os jobs sao serializados (1 de cada vez) e uma falha temporaria NAO queima mais o video — retenta ate 3x."
+                                       },
+                                       {
+                                           "kind":  "post_confirm_timeout",
+                                           "message":  "TikTok/IG demorando pra confirmar a publicacao marcava o video como FALHOU pra sempre (sumia da fila). Agora conta como falha temporaria e retenta no proximo ciclo em vez de perder o video."
+                                       }
+                                   ]
+                     },
+                     {
                          "version":  "1.6.0",
                          "fixed":  [
                                        {

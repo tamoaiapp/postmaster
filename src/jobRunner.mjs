@@ -14,6 +14,7 @@ import {
   converterParaReel, loadState, marcarPostado, marcarFalhou,
   marcarTrechoUsado, proximoVideoComEspaco, calcGapsLivres,
   urlsLookLikeYoutubeVideos,
+  registrarTentativaPost, limparTentativasPost,
 } from './sources/youtube.mjs'
 import { smartCutYouTube } from './smartCut.mjs'
 import { applyAutoEdit } from './autoEditor.mjs'
@@ -33,6 +34,19 @@ import { applyAutoEdit16x9 } from './autoEditor16x9.mjs'
 import { selecionarTrechosDensos, aplicarCorteDenso } from './smartCutLong.mjs'
 import { dublarVideo }       from './dublagem/index.mjs'
 import { gerarMetadadosYoutube } from './youtubeMeta.mjs'
+
+// v1.6.1: quantas vezes retentar uma postagem que falhou por motivo TRANSITÓRIO
+// antes de desistir (marcar FALHOU). Evita queimar o vídeo num blip de rede.
+const MAX_POST_RETRIES = 3
+
+// Erros de postagem TRANSITÓRIOS (rede/carregamento/plataforma lenta): não devem
+// queimar o vídeo — o jobRunner retenta no próximo ciclo até MAX_POST_RETRIES.
+// Ex.: "page.goto: Timeout 40000ms", "locator.click: Timeout", "net::ERR_...",
+// "TikTok demorou >4min processando", "Botão Post não ficou enabled em 5min".
+function isTransientPostError(msg = '') {
+  const m = String(msg).toLowerCase()
+  return /timeout|page\.goto|navigating to|net::|econnreset|etimedout|esockettimedout|socket hang up|locator\.\w+: timeout|target closed|frame was detached|browser has disconnected|websocket|processando|server-?side|n[aã]o ficou enabled|demorou/.test(m)
+}
 
 export default async function jobRunner(job, dataDir, log) {
   // Registra a sessao no Live View desde o inicio (mesmo sem browser aberto ainda)
@@ -483,6 +497,8 @@ export default async function jobRunner(job, dataDir, log) {
   // ── Postar ───────────────────────────────────────────────────────────────────
   let ok = false
   let retryLater = false
+  let threw = false      // o poster LANÇOU exceção? (vs. retornou false silencioso)
+  let postErrMsg = ''    // mensagem do erro (pra classificar transitório vs permanente)
   try {
     if (job.platform === 'instagram') {
       log('📤 Postando no Instagram...')
@@ -504,7 +520,9 @@ export default async function jobRunner(job, dataDir, log) {
       })
     }
   } catch (err) {
-    log(`❌ Erro ao postar: ${err.message}`)
+    threw = true
+    postErrMsg = err.message || ''
+    log(`❌ Erro ao postar: ${postErrMsg}`)
     // v1.3.22: erro com retryLater = publish-drafts esta usando o Chrome.
     // NAO limpa video, NAO marca falhou - so devolve sem postar pra re-tentar.
     if (err.retryLater) {
@@ -520,6 +538,7 @@ export default async function jobRunner(job, dataDir, log) {
   if (retryLater) return { posted: false, retryLater: true }
 
   if (ok && videoMeta.id) {
+    try { limparTentativasPost(stateFile, videoMeta.id) } catch {}
     // YouTube com reaproveitamento: salva trecho usado, esgota apenas se sem espaço
     // (apenas pra cutType !== 'full' — full significa "vídeo inteiro", não múltiplos cortes)
     if (job.source === 'youtube' && videoMeta.usedRange && job.cutType !== 'full') {
@@ -539,12 +558,31 @@ export default async function jobRunner(job, dataDir, log) {
       marcarPostado(stateFile, videoMeta.id)
     }
   } else if (!ok && videoMeta.id) {
-    // v1.3.12: bot falhou na postagem mas video JA FOI uploadado (yt) ou processado
-    // (ig/tt). Marcar como FALHOU pra nao re-tentar mesmo video infinitamente.
-    // Antes: falha -> nao marcava nada -> proximo ciclo pegava mesmo video -> loop
-    // de upload do mesmo conteudo. User reportou "postando o mesmo video sempre".
-    log(`⚠️ Marca video como FALHOU (evita re-tentar mesmo conteudo no proximo ciclo)`)
+    // v1.6.1: NÃO queima o vídeo em falha TRANSITÓRIA (page.goto timeout, plataforma
+    // lenta, rede). Antes (v1.3.12): qualquer falha -> marcarFalhou -> vídeo sumia
+    // pra sempre. Um blip de 40s custava um vídeo. Isso causava o "posta metade".
+    // Agora: erro transitório retenta até MAX_POST_RETRIES; só marca FALHOU se for
+    // erro PERMANENTE (codec/formato rejeitado) OU esgotar as tentativas.
+    // Poster que retorna false sem lançar (ex.: TikTok não confirmou a publicação /
+    // processamento server-side lento) também é tratado como transitório.
+    const transiente = threw ? isTransientPostError(postErrMsg) : true
+    if (transiente) {
+      let n = MAX_POST_RETRIES
+      try { n = registrarTentativaPost(stateFile, videoMeta.id) } catch {}
+      if (n < MAX_POST_RETRIES) {
+        log(`⏳ Falha temporária ao postar (tentativa ${n}/${MAX_POST_RETRIES}) — vídeo PRESERVADO, retenta no próximo ciclo`)
+        return { posted: false, transient: true, attempt: n, errorMsg: postErrMsg || 'post_confirm_timeout: plataforma não confirmou a publicação' }
+      }
+      log(`⛔ ${MAX_POST_RETRIES} tentativas falharam — marcando FALHOU pra não travar a fila do canal`)
+      try { limparTentativasPost(stateFile, videoMeta.id) } catch {}
+      try { marcarFalhou(stateFile, videoMeta.id) } catch (e) { log(`   marcarFalhou erro: ${e.message.slice(0,60)}`) }
+      return { posted: false, failedPermanent: true, gaveUp: true, errorMsg: postErrMsg || 'post_confirm_timeout: esgotou tentativas' }
+    }
+    // Erro PERMANENTE (video rejeitado, formato incompatível): queima na hora — não
+    // adianta retentar o mesmo conteúdo que a plataforma nunca vai aceitar.
+    log(`⚠️ Falha permanente — marca vídeo como FALHOU (${postErrMsg.slice(0, 60)})`)
     try { marcarFalhou(stateFile, videoMeta.id) } catch (e) { log(`   marcarFalhou erro: ${e.message.slice(0,60)}`) }
+    return { posted: false, failedPermanent: true, errorMsg: postErrMsg }
   }
   return { posted: ok }
   } // fim de runJob()

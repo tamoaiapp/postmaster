@@ -566,7 +566,9 @@ ipcMain.handle('jobs:runNow', async (_, id) => {
   const jobs = readDB('jobs.json')
   const job = jobs.find(j => j.id === id)
   if (!job) return { ok: false }
-  runJobNow(job)
+  // v1.6.1: passa pela MESMA fila serial dos jobs agendados (não sobe um 2º
+  // navegador em paralelo com um ciclo automático em andamento).
+  enqueueJob(job, { oneShot: true })
   return { ok: true }
 })
 
@@ -645,15 +647,86 @@ function sendJobStatus(jobId, status) {
 }
 
 // ── Scheduler ────────────────────────────────────────────────────────────────
+// ── Serialização global de jobs (1 navegador por vez) ────────────────────────
+// v1.6.1: rodar 2+ jobs em paralelo sobe vários Chromium ao mesmo tempo e estoura
+// page.goto por contenção de CPU/rede — causa nº1 do "posta metade dos vídeos"
+// (confirmado nos logs do cliente: 3 jobs -> 3 page.goto Timeout -> 3 FALHOU).
+// Fila global FIFO: um job de cada vez, com um respiro entre eles.
+const JOB_GAP_MS = 60_000        // pausa entre jobs (evita rajada + dá fôlego pro PC)
+const jobQueue = []              // jobs aguardando execução
+const queuedIds = new Set()      // ids já na fila (não empilha o mesmo job)
+let activeJobId = null           // job rodando agora (null = ocioso)
+let draining = false
+
+function enqueueJob(job, { oneShot = false } = {}) {
+  // Já rodando ou já enfileirado? ignora este disparo (o intervalo fura de novo)
+  if (activeJobId === job.id || queuedIds.has(job.id)) {
+    sendLog(job.id, '⏳ Ciclo anterior ainda na fila/rodando — pulando este disparo')
+    return
+  }
+  jobQueue.push({ job, oneShot })
+  queuedIds.add(job.id)
+  const st = runningJobs.get(job.id)
+  if (st) st.status = 'na fila'
+  sendJobStatus(job.id, 'na fila')
+  drainQueue()
+}
+
+async function drainQueue() {
+  if (draining) return
+  draining = true
+  try {
+    while (jobQueue.length) {
+      const { job, oneShot } = jobQueue.shift()
+      queuedIds.delete(job.id)
+      // Job agendado que foi PARADO enquanto esperava: descarta. One-shot ("rodar
+      // agora") sempre roda, mesmo sem estar no scheduler.
+      if (!oneShot && !runningJobs.has(job.id)) continue
+      activeJobId = job.id
+      try { await runJobNow(job) } catch { /* runJobNow já trata os próprios erros */ }
+      activeJobId = null
+      if (jobQueue.length) await new Promise(r => setTimeout(r, JOB_GAP_MS))
+    }
+  } finally {
+    draining = false
+  }
+}
+
+// Registra erro classificado no VPS (errors.jsonl) — reutilizado pelo catch de
+// runJobNow E pela falha devolvida no result (que não lança exceção).
+async function registerClassifiedError(errMsg, job) {
+  try {
+    const { classifyError, registerError } = await import('./src/supportAgent.mjs')
+    const cls = classifyError(errMsg || '')
+    if (!cls) return
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'))
+    try {
+      const { recordErrorOccurrence } = await import('./src/fixAnnouncer.mjs')
+      recordErrorOccurrence(DATA_DIR, cls.kind)
+    } catch {}
+    registerError({
+      kind: cls.kind,
+      summary: cls.summary,
+      context: {
+        appVersion: pkg.version,
+        account: job.account || '?',
+        platform: job.platform || '?',
+        category: cls.category || 'unknown',
+        lastError: (errMsg || '').slice(0, 200),
+      },
+    }).catch(() => {})
+  } catch {}
+}
+
 function startJob(job) {
   if (runningJobs.has(job.id)) return
   sendJobStatus(job.id, 'aguardando')
   sendLog(job.id, `▶️ Job iniciado — intervalo: ${job.intervalMin}min`)
 
-  const run = () => runJobNow(job)
-  run() // Executa imediatamente
+  const run = () => enqueueJob(job)
   const timer = setInterval(run, (job.intervalMin || 10) * 60 * 1000)
   runningJobs.set(job.id, { timer, status: 'aguardando' })
+  run() // Enfileira o primeiro ciclo imediatamente (fila serial evita 2 navegadores juntos)
 }
 
 function stopJob(id) {
@@ -696,8 +769,24 @@ async function runJobNow(job) {
     if (win) win.webContents.send('job:update', jobs[idx])
 
     if (state) state.status = 'aguardando'
-    sendJobStatus(job.id, result.posted ? '✅ postado' : 'aguardando')
-    sendLog(job.id, result.posted ? `✅ Postado com sucesso!` : `⏭️ Nada novo para postar`)
+    // v1.6.1: status HONESTO — antes toda falha de postagem virava "Nada novo para
+    // postar" (idêntico a "não tinha vídeo novo"), então o cliente não sabia que
+    // quebrou. Agora separa: postado / falha temporária (retenta) / pulado / nada novo.
+    if (result.posted) {
+      sendJobStatus(job.id, '✅ postado')
+      sendLog(job.id, `✅ Postado com sucesso!`)
+    } else if (result.transient) {
+      sendJobStatus(job.id, 'retentar')
+      sendLog(job.id, `⏳ Falha temporária ao postar (rede/plataforma) — vídeo preservado, tento de novo no próximo ciclo`)
+    } else if (result.failedPermanent) {
+      sendJobStatus(job.id, 'falhou')
+      sendLog(job.id, `⚠️ Não consegui postar este vídeo — pulado após tentativas`)
+      // Só registra na telemetria quando DESISTE do vídeo (não a cada retry, pra não spammar)
+      await registerClassifiedError(result.errorMsg, job)
+    } else {
+      sendJobStatus(job.id, 'aguardando')
+      sendLog(job.id, `⏭️ Nada novo para postar`)
+    }
   } catch (e) {
     if (state) state.status = 'aguardando'
     sendJobStatus(job.id, 'erro')
@@ -707,30 +796,7 @@ async function runJobNow(job) {
     // "Pedir ajuda" e ela já lê os logs e responde direto.
     // Também é gravado localmente em fix-history.json pro app avisar
     // "esse problema foi resolvido" quando o auto-update aplicar o fix.
-    try {
-      const { classifyError, registerError } = await import('./src/supportAgent.mjs')
-      const cls = classifyError(e.message || '')
-      if (cls) {
-        const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf-8'))
-        // 1. Local: marca historico pro aviso de fix
-        try {
-          const { recordErrorOccurrence } = await import('./src/fixAnnouncer.mjs')
-          recordErrorOccurrence(DATA_DIR, cls.kind)
-        } catch {}
-        // 2. Remoto: registra no VPS pra TamoIA poder consultar
-        registerError({
-          kind: cls.kind,
-          summary: cls.summary,
-          context: {
-            appVersion: pkg.version,
-            account: job.account || '?',
-            platform: job.platform || '?',
-            category: cls.category || 'unknown',
-            lastError: e.message?.slice(0, 200),
-          },
-        }).catch(() => {})
-      }
-    } catch {}
+    await registerClassifiedError(e.message, job)
   }
 }
 
