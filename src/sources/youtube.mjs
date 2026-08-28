@@ -7,7 +7,14 @@ import { promisify } from 'util'
 import fs from 'fs'
 import path from 'path'
 import ffmpegStaticOriginal from 'ffmpeg-static'
-import sharp from 'sharp'
+// v1.6.3: sharp é módulo NATIVO — import no topo derrubava o jobRunner inteiro se o
+// .node falhasse (antivírus/instalação nova). Agora é lazy: se falhar, só o cálculo
+// de altura da thumbnail degrada (já está em try/catch), o vídeo posta normal.
+let _sharp = null
+async function getSharp() {
+  if (!_sharp) _sharp = (await import('sharp')).default
+  return _sharp
+}
 import { getVideoDimensions } from '../faceTrack.mjs'
 import { extractVideoId, urlsLookLikeYoutubeVideos } from './youtubeUrl.mjs'
 export { extractVideoId, urlsLookLikeYoutubeVideos }
@@ -314,7 +321,7 @@ export async function converterParaReel(videoPath, thumbPath, log, opts = {}) {
     const tp = thumbPath.replace(/\\/g, '/')
     extraInputs.push(`-i "${tp}"`)
     let thumbH = 608
-    try { const m = await sharp(thumbPath).metadata(); thumbH = Math.round(m.height * 1080 / m.width); if (thumbH % 2) thumbH++ } catch {}
+    try { const sharp = await getSharp(); const m = await sharp(thumbPath).metadata(); thumbH = Math.round(m.height * 1080 / m.width); if (thumbH % 2) thumbH++ } catch {}
     const blockH = thumbH + VIDEO_H
     const thumbY = Math.round((1920 - blockH) / 2)
     const videoY = thumbY + thumbH

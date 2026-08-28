@@ -93,13 +93,26 @@ const runningJobs = new Map() // jobId → { timer, lastRun, status }
 // ── Workers importados dinamicamente ─────────────────────────────────────────
 let jobRunner, loginIG, loginTK
 
+let lastWorkerError = null
 async function loadWorkers() {
-  jobRunner  = (await import('./src/jobRunner.mjs')).default
-  loginIG    = (await import('./src/loginIG.mjs')).default
-  loginTK    = (await import('./src/loginTK.mjs')).default
-  aiManager  = await import('./src/aiManager.mjs')
+  // v1.6.3: carrega cada worker ISOLADO. Antes um único import quebrado (ex.:
+  // antivírus bloqueando um componente nativo numa instalação nova) derrubava
+  // TODOS e deixava jobRunner=undefined -> cliente via "jobRunner is not a function"
+  // sem pista nenhuma. Agora guardamos o erro REAL pra mostrar/registrar depois.
+  const tryImport = async (label, spec, pick) => {
+    try { return pick(await import(spec)) }
+    catch (e) {
+      lastWorkerError = `${label}: ${e?.message || e}`
+      console.error(`[loadWorkers] FALHOU ${label}:`, e?.stack || e?.message)
+      return null
+    }
+  }
+  jobRunner = await tryImport('jobRunner', './src/jobRunner.mjs', m => m.default)
+  loginIG   = await tryImport('loginIG',   './src/loginIG.mjs',   m => m.default)
+  loginTK   = await tryImport('loginTK',   './src/loginTK.mjs',   m => m.default)
+  aiManager = await tryImport('aiManager', './src/aiManager.mjs', m => m)
   // Aponta o caminho onde o modelo .gguf vai morar (userData persistente)
-  aiManager.setModelPath(path.join(DATA_DIR, 'model.gguf'))
+  if (aiManager) { try { aiManager.setModelPath(path.join(DATA_DIR, 'model.gguf')) } catch {} }
 }
 
 // ── Janela principal ──────────────────────────────────────────────────────────
@@ -735,6 +748,21 @@ function stopJob(id) {
 async function runJobNow(job) {
   const state = runningJobs.get(job.id)
   if (state?.status === 'postando') return // Evita execução dupla
+
+  // v1.6.3: se o motor não carregou no boot, tenta de novo AGORA e mostra o erro
+  // REAL (antes o cliente só via "jobRunner is not a function" e nada era registrado).
+  if (typeof jobRunner !== 'function') {
+    try { jobRunner = (await import('./src/jobRunner.mjs')).default } catch (e) { lastWorkerError = `jobRunner: ${e?.message || e}` }
+    if (typeof jobRunner !== 'function') {
+      const real = lastWorkerError || 'falha ao carregar o motor de postagem'
+      if (state) state.status = 'aguardando'
+      sendJobStatus(job.id, 'erro')
+      sendLog(job.id, `❌ App não carregou o motor de postagem: ${real}`)
+      sendLog(job.id, `   Costuma ser o antivírus bloqueando um componente do PostMaster. Libere/whiteliste o app no antivírus e reinstale.`)
+      await registerClassifiedError(`worker_load_failed: ${real}`, job)
+      return
+    }
+  }
 
   if (state) state.status = 'postando'
   sendJobStatus(job.id, 'postando')

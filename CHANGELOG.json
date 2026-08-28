@@ -3,6 +3,15 @@
     "_doc":  "Lista de versoes com os kinds de erro que cada uma corrige. O app baixa esse JSON, verifica se o cliente teve algum desses erros recentemente, e mostra toast quando o auto-update aplicar o fix. Fonte: src/supportAgent.mjs classifyError().",
     "versions":  [
                      {
+                         "version":  "1.6.3",
+                         "fixed":  [
+                                       {
+                                           "kind":  "worker_load_failed",
+                                           "message":  "Erro 'jobRunner is not a function' em instalacao nova: um componente NATIVO (onnxruntime/sharp) bloqueado pelo antivirus derrubava o motor de postagem inteiro no boot -- ate em jobs que nem usavam face-tracking. Agora os nativos carregam sob demanda (nao derrubam mais o app); se falharem, a edicao com IA cai no modo simples e o video posta normal. Alem disso o app passa a mostrar o erro REAL (antes so dizia 'jobRunner is not a function')."
+                                       }
+                                   ]
+                     },
+                     {
                          "version":  "1.6.2",
                          "fixed":  [
                                        {

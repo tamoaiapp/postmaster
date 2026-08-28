@@ -16,14 +16,27 @@
  * Performance: ~50-200ms por keyframe (CPU). Em vídeo de 120s com ~30 cenas,
  * face detection custa ~3-10s. Total render fica ~30% mais lento.
  */
-import * as ort from 'onnxruntime-node'
-import sharp from 'sharp'
 import fs from 'fs'
 import path from 'path'
 import { exec } from 'child_process'
 import { promisify } from 'util'
 
 const execAsync = promisify(exec)
+
+// v1.6.3: onnxruntime-node e sharp são módulos NATIVOS. Importá-los no TOPO fazia o
+// jobRunner INTEIRO falhar ao carregar ("jobRunner is not a function") quando o
+// antivírus bloqueava/corrompia o .node numa instalação nova — derrubando até jobs
+// que nem usam face-tracking (ex.: tiktok→tiktok). Agora carregam SOB DEMANDA; se
+// falharem, só o face-tracking degrada (o jobRunner faz fallback pro crop central).
+let _ort = null, _sharp = null
+async function getOrt() {
+  if (!_ort) _ort = await import('onnxruntime-node')
+  return _ort
+}
+async function getSharp() {
+  if (!_sharp) _sharp = (await import('sharp')).default
+  return _sharp
+}
 
 // ── Modelo: input/output specs do Ultra-Light RFB-640 ──────────────────────────
 const MODEL_INPUT_W = 640
@@ -40,6 +53,7 @@ export function setModelPath(p) { _modelPath = p }
 async function getSession() {
   if (_session) return _session
   if (!_modelPath || !fs.existsSync(_modelPath)) throw new Error(`Modelo face não encontrado em ${_modelPath}`)
+  const ort = await getOrt()
   _session = await ort.InferenceSession.create(_modelPath, { executionProviders: ['cpu'] })
   return _session
 }
@@ -91,6 +105,8 @@ export async function extractFrameAt(ffmpegPath, videoPath, t, outPath) {
  */
 export async function detectFacesInImage(imagePath, minConfidence = 0.7) {
   const session = await getSession()
+  const ort = await getOrt()
+  const sharp = await getSharp()
 
   // Carrega imagem original pra saber dims
   const meta = await sharp(imagePath).metadata()
@@ -186,6 +202,7 @@ async function extractMouthPixels(imagePath, face) {
 
   const SAMPLE_W = 32, SAMPLE_H = 16 // resolução baixa pra comparação rápida e robusta a ruído
   try {
+    const sharp = await getSharp()
     const { data } = await sharp(imagePath)
       .extract({
         left:   Math.max(0, Math.round(mouthX)),

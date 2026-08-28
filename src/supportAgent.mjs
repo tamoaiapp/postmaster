@@ -187,6 +187,21 @@ export function classifyError(errMsg) {
     }
   }
 
+  // ── Motor não carregou (nativo bloqueado por antivírus em instalação nova) ──
+  // v1.6.3: "jobRunner is not a function" = loadWorkers falhou (onnxruntime/sharp
+  // nativo bloqueado/corrompido). Agora os nativos são lazy (não derrubam o app) e
+  // isto é registrado com o erro real em vez de sumir silencioso.
+  if (m.includes('worker_load_failed') || m.includes('is not a function') ||
+      m.includes('cannot find module') || m.includes('was compiled against') ||
+      (m.includes('.node') && (m.includes('not a valid') || m.includes('could not be found') || m.includes('dll')))) {
+    return {
+      kind: 'worker_load_failed',
+      category: 'cliente_externo',
+      summary: 'Motor de postagem não carregou no boot — normalmente antivírus bloqueando/corrompendo um componente nativo (onnxruntime/sharp) numa instalação nova. v1.6.3 tornou os nativos lazy (não derrubam mais o app) e passou a mostrar o erro real.',
+      fix: null,
+    }
+  }
+
   // ── Bugs do app (precisam fix em codigo + nova release) ─────────────────
   if (m.includes('ig_rejected_video') || m.includes('este arquivo de v') || m.includes('could not be played')) {
     return {
